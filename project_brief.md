@@ -28,5 +28,37 @@
 - **Audit Logging & Telemetry**: Logs agent tool executions, parameters, caller identity, and response status via Cloud Trace / OpenTelemetry.
 - **Rate Limiting & Timeout Controls**: Prevents AI agents from overloading background Java services.
 
-Recommended for every project: memory, storage, tools, image generation, A2UI, web frontend (FastAPI proxy + Cloud Run)
-Agent-specific / stretch: Java app OpenAPI auto-discovery, selective endpoint filtering, user login & auth, process lifecycle manager (start/stop/restart), code sandbox for generated MCP validation, Cloud Trace telemetry.
+---
+
+### 🛠️ Running Locally (File-Based Storage Strategy)
+
+You can run the application locally without requiring a connection to GCP Firestore by using the **File-Based Storage Strategy (`filebased`)**. In file-based mode, all MCP server configurations are automatically loaded, managed, and persisted as `.json` files in the local `mcps/` directory.
+
+#### Prerequisites
+- Python 3.10+
+- Install dependencies:
+  ```bash
+  pip install -r frontend/requirements.txt
+  ```
+
+#### Step-by-Step Local Launch:
+
+1. **Verify Local MCP Config Files**:
+   Ensure the `mcps/` directory exists and contains seed `.json` files (e.g., `petstore_mcp.json`, `inventory_service_mcp.json`):
+   ```bash
+   mkdir -p mcps/
+   ```
+
+2. **Start the FastAPI Web App & Proxy**:
+   From the project root directory, run:
+   ```bash
+   python3 -m uvicorn frontend.main:app --host 0.0.0.0 --port 8080 --reload
+   ```
+
+3. **Open the App in Browser**:
+   Open **[http://localhost:8080](http://localhost:8080)**.
+
+4. **Select File-Based Storage Strategy**:
+   - In the left panel under **Storage Strategy**, select **`📁 File-Based Storage (mcps/)`** from the dropdown menu.
+   - The MCP Server Fleet sidebar will load all `.json` server files from the `mcps/` directory.
+   - Sub-agent **Start** and **Stop** buttons will update server statuses directly inside the local `mcps/*.json` files.
