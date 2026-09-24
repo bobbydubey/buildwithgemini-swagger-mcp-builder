@@ -481,3 +481,75 @@ def save_mcp_server_to_db(
         return json.dumps({"status": "error", "error": str(err)})
 
 
+def get_mcp_server_from_db(server_name: str) -> str:
+    """Reads full details and generated code of a specific registered MCP server from Firestore.
+
+    Args:
+        server_name: Unique identifier of the server (e.g. petstore_mcp).
+
+    Returns:
+        JSON string containing the document fields and tools list.
+    """
+    try:
+        from google.cloud import firestore
+        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
+        doc = db.collection("mcp_servers").document(sanitized_id).get()
+        if doc.exists:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            return json.dumps({"status": "success", "server": data}, indent=2)
+        return json.dumps({"status": "error", "error": f"Server '{sanitized_id}' not found in Firestore."})
+    except Exception as err:
+        return json.dumps({"status": "error", "error": str(err)})
+
+
+def execute_mcp_server_tool(server_name: str, endpoint_path: str, method: str = "GET", query_or_body_json: str = "{}") -> str:
+    """Executes an API request against a registered MCP server's target base URL on behalf of sub-agents.
+
+    Args:
+        server_name: Name of the registered MCP server (e.g. petstore_mcp).
+        endpoint_path: Path of the API endpoint (e.g. /pet/1 or /pet/findByStatus).
+        method: HTTP method (GET, POST, PUT, DELETE).
+        query_or_body_json: JSON string of parameters or body data (e.g. '{"status": "available"}').
+
+    Returns:
+        Response from the target service or error message.
+    """
+    full_url = ""
+    try:
+        from google.cloud import firestore
+        import urllib.parse
+        import urllib.request
+
+        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
+        doc = db.collection("mcp_servers").document(sanitized_id).get()
+        if not doc.exists:
+            return json.dumps({"error": f"MCP server '{sanitized_id}' not found in database."})
+        
+        server_data = doc.to_dict()
+        base_url = server_data.get("base_url", "http://localhost:8080").rstrip("/")
+        full_url = f"{base_url}/{endpoint_path.lstrip('/')}"
+
+        params = json.loads(query_or_body_json) if query_or_body_json else {}
+        
+        if method.upper() == "GET" and params:
+            query_str = urllib.parse.urlencode(params)
+            full_url = f"{full_url}?{query_str}"
+            req = urllib.request.Request(full_url, headers={"Accept": "application/json", "User-Agent": "MCP-Agent/1.0"}, method="GET")
+        else:
+            data_bytes = json.dumps(params).encode("utf-8") if params else None
+            headers = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": "MCP-Agent/1.0"}
+            req = urllib.request.Request(full_url, data=data_bytes, headers=headers, method=method.upper())
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content = resp.read().decode("utf-8")
+            if len(content) > 4000:
+                content = content[:4000] + "\n... [Output truncated for context protection]"
+            return json.dumps({"status": "success", "url": full_url, "response": content}, indent=2)
+    except Exception as err:
+        return json.dumps({"status": "error", "url": full_url, "error": str(err)})
+
+
+

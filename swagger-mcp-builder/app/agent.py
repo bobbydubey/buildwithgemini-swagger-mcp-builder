@@ -22,8 +22,10 @@ from google.genai import types
 from app.a2ui_utils import a2ui_callback
 from app.tools import (
     create_automation_subagent,
+    execute_mcp_server_tool,
     filter_endpoints,
     generate_mcp_server,
+    get_mcp_server_from_db,
     ingest_swagger_input,
     list_mcp_servers_from_db,
     manage_mcp_server,
@@ -39,13 +41,14 @@ schema_manager = A2uiSchemaManager(
 SYSTEM_INSTRUCTION = schema_manager.generate_system_prompt(
     role_description=(
         "You are the Root Manager Agent for Java Application Automation. "
-        "Your primary role is ORCHESTRATION AND MANAGEMENT: "
+        "Your primary role is ORCHESTRATION, MANAGEMENT, AND TOOL EXECUTION: "
         "1. Ingest OpenAPI/Swagger documentation from running Java applications (e.g. Spring Boot `/v3/api-docs`). "
         "2. Filter endpoints to remove internal actuator/health routes. "
         "3. Generate FastMCP server code containing tools for the Java application's REST APIs. "
-        "4. Persist registered MCP server metadata to the Firestore database (`save_mcp_server_to_db`, `list_mcp_servers_from_db`). "
-        "5. Create a dedicated AUTOMATION SUB-AGENT (using `create_automation_subagent`) bound to the generated MCP server. "
-        "6. Manage background MCP server processes (`manage_mcp_server`)."
+        "4. Persist registered MCP server metadata to the Firestore database (`save_mcp_server_to_db`, `list_mcp_servers_from_db`, `get_mcp_server_from_db`). "
+        "5. Create dedicated AUTOMATION SUB-AGENTS (using `create_automation_subagent`) bound to generated MCP servers. "
+        "6. Manage background MCP server processes (`manage_mcp_server`). "
+        "7. Execute API requests and data actions on registered MCP servers on behalf of user requests or sub-agents using `execute_mcp_server_tool`."
     ),
     workflow_description=(
         "Analyze the request and return structured UI (Cards, Columns, Rows, Text) when presenting MCP servers, Swagger endpoints, or process statuses. "
@@ -54,7 +57,8 @@ SYSTEM_INSTRUCTION = schema_manager.generate_system_prompt(
         "Step 3: `generate_mcp_server` (Generate MCP server file with payload safety). "
         "Step 4: `save_mcp_server_to_db` (Persist MCP server record to Firestore). "
         "Step 5: `create_automation_subagent` (Instantiate dedicated Automation Sub-Agent). "
-        "Step 6: `manage_mcp_server` (Start server and verify active status)."
+        "Step 6: `manage_mcp_server` (Start server and verify active status). "
+        "Step 7: `execute_mcp_server_tool` (Run API request against target server)."
     ),
     ui_description=(
         "Keep every surface tiny and flat: ONE Card > ONE Column > a few Text rows. "
@@ -90,8 +94,10 @@ root_agent = Agent(
         generate_mcp_server,
         save_mcp_server_to_db,
         list_mcp_servers_from_db,
+        get_mcp_server_from_db,
         create_automation_subagent,
         manage_mcp_server,
+        execute_mcp_server_tool,
     ],
     after_model_callback=a2ui_callback,
 )
