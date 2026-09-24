@@ -392,44 +392,56 @@ def create_automation_subagent(subagent_name: str, server_name: str, role_descri
 
 # HARDCODED GCP Project ID string to prevent Agent Platform deployment project-number errors
 FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
-MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mcps"))
-if not os.path.exists(MCPS_DIR):
-    MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+_root_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mcps"))
+_pkg_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+
+if os.path.exists(_root_mcps) and glob.glob(os.path.join(_root_mcps, "*.json")):
+    MCPS_DIR = _root_mcps
+elif os.path.exists(_pkg_mcps):
+    MCPS_DIR = _pkg_mcps
+else:
+    MCPS_DIR = _pkg_mcps
 os.makedirs(MCPS_DIR, exist_ok=True)
 
 
-def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = "gcp") -> str:
-    """Reads all registered MCP servers from GCP Firestore collection 'mcp_servers' or local file-based 'mcps/' directory.
+def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = "") -> str:
+    """Reads all registered MCP servers from local file-based 'mcps/' directory or GCP Firestore collection 'mcp_servers'.
 
     Args:
         status_filter: Optional filter by server status (e.g. 'running', 'stopped', 'ready'). Leave empty to list all.
-        storage_strategy: Storage backend strategy ('gcp' for Firestore, 'filebased' for local JSON files).
+        storage_strategy: Storage backend strategy ('filebased', 'gcp', or empty for automatic discovery).
 
     Returns:
         JSON string containing the array of matching MCP server documents.
     """
-    if storage_strategy.lower() == "filebased":
+    results = []
+
+    # Always check local MCPS_DIR first if strategy is filebased, empty, or fallback
+    if not storage_strategy or storage_strategy.lower() == "filebased":
         try:
             import glob
-            results = []
             json_files = glob.glob(os.path.join(MCPS_DIR, "*.json"))
             for filepath in json_files:
                 try:
                     with open(filepath, "r") as f:
                         data = json.load(f)
                         data["id"] = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
-                        if not status_filter or (data.get("status") or "").lower() == status_filter.lower():
+                        st = (data.get("status") or "ready").lower()
+                        sf = status_filter.lower()
+                        if not sf or st == sf or (sf in ["running", "ready"] and st in ["running", "ready"]):
                             results.append(data)
                 except Exception:
                     pass
-            return json.dumps({
-                "status": "success",
-                "storage_strategy": "filebased",
-                "total": len(results),
-                "servers": results
-            }, indent=2)
-        except Exception as err:
-            return json.dumps({"status": "error", "error": str(err)})
+        except Exception:
+            pass
+
+    if results or storage_strategy.lower() == "filebased":
+        return json.dumps({
+            "status": "success",
+            "storage_strategy": "filebased",
+            "total": len(results),
+            "servers": results
+        }, indent=2)
 
     try:
         from google.cloud import firestore
@@ -437,12 +449,10 @@ def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = "g
         collection_ref = db.collection("mcp_servers")
 
         if status_filter:
-            query = collection_ref.where("status", "==", status_filter.lower())
-            docs = query.stream()
+            docs = collection_ref.where("status", "==", status_filter.lower()).stream()
         else:
             docs = collection_ref.stream()
 
-        results = []
         for doc in docs:
             data = doc.to_dict()
             data["id"] = doc.id
@@ -527,7 +537,7 @@ def save_mcp_server_to_db(
 
 
 def get_mcp_server_from_db(server_name: str) -> str:
-    """Reads full details and generated code of a specific registered MCP server from Firestore.
+    """Reads full details and generated code of a specific registered MCP server from local file or Firestore.
 
     Args:
         server_name: Unique identifier of the server (e.g. petstore_mcp).
@@ -535,16 +545,27 @@ def get_mcp_server_from_db(server_name: str) -> str:
     Returns:
         JSON string containing the document fields and tools list.
     """
+    sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
+    
+    local_json = os.path.join(MCPS_DIR, f"{sanitized_id}.json")
+    if os.path.exists(local_json):
+        try:
+            with open(local_json, "r") as f:
+                data = json.load(f)
+                data["id"] = sanitized_id
+                return json.dumps({"status": "success", "server": data}, indent=2)
+        except Exception:
+            pass
+
     try:
         from google.cloud import firestore
         db = firestore.Client(project=FIRESTORE_PROJECT_ID)
-        sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
         doc = db.collection("mcp_servers").document(sanitized_id).get()
         if doc.exists:
             data = doc.to_dict()
             data["id"] = doc.id
             return json.dumps({"status": "success", "server": data}, indent=2)
-        return json.dumps({"status": "error", "error": f"Server '{sanitized_id}' not found in Firestore."})
+        return json.dumps({"status": "error", "error": f"Server '{sanitized_id}' not found."})
     except Exception as err:
         return json.dumps({"status": "error", "error": str(err)})
 
