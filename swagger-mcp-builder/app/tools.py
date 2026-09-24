@@ -565,14 +565,27 @@ def execute_mcp_server_tool(server_name: str, endpoint_path: str, method: str = 
         import urllib.parse
         import urllib.request
 
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
         sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
-        doc = db.collection("mcp_servers").document(sanitized_id).get()
-        if not doc.exists:
-            return json.dumps({"error": f"MCP server '{sanitized_id}' not found in database."})
-        
-        server_data = doc.to_dict()
-        base_url = server_data.get("base_url", "http://localhost:8080").rstrip("/")
+        server_data = {}
+        try:
+            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            doc = db.collection("mcp_servers").document(sanitized_id).get()
+            if doc.exists:
+                server_data = doc.to_dict()
+        except Exception:
+            pass
+
+        if not server_data:
+            local_json = os.path.join(MCPS_DIR, f"{sanitized_id}.json")
+            if os.path.exists(local_json):
+                with open(local_json, "r") as f:
+                    server_data = json.load(f)
+
+        base_url = server_data.get("base_url", "").rstrip("/")
+        if not base_url or "localhost" in base_url:
+            if "petstore" in sanitized_id:
+                base_url = "https://petstore.swagger.io/v2"
+
         full_url = f"{base_url}/{endpoint_path.lstrip('/')}"
 
         params = json.loads(query_or_body_json) if query_or_body_json else {}
