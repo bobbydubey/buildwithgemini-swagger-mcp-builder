@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import datetime
+import glob
 
 import google.auth
 import google.auth.transport.requests
@@ -16,6 +17,8 @@ RESOURCE = os.environ.get(
 )
 LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
 FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
+MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
+os.makedirs(MCPS_DIR, exist_ok=True)
 
 _creds, _ = google.auth.default(
     scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -100,38 +103,73 @@ def _extract_part(raw_val: str) -> dict | None:
 
 
 @app.get("/api/mcps")
-async def get_mcps():
-    """Returns list of all registered MCP servers stored in Firestore."""
-    try:
-        from google.cloud import firestore
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
-        docs = list(db.collection("mcp_servers").stream())
-        results = []
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            results.append(data)
-        return JSONResponse({"status": "success", "mcps": results})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+async def get_mcps(strategy: str = "gcp"):
+    """Returns list of all registered MCP servers from GCP Firestore or File-based mcps/ directory."""
+    if strategy.lower() == "filebased":
+        try:
+            results = []
+            json_files = glob.glob(os.path.join(MCPS_DIR, "*.json"))
+            for filepath in json_files:
+                try:
+                    with open(filepath, "r") as f:
+                        data = json.load(f)
+                        data["id"] = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
+                        results.append(data)
+                except Exception:
+                    pass
+            return JSONResponse({"status": "success", "strategy": "filebased", "mcps": results})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    else:
+        # Default: GCP Firestore
+        try:
+            from google.cloud import firestore
+            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            docs = list(db.collection("mcp_servers").stream())
+            results = []
+            for doc in docs:
+                data = doc.to_dict()
+                data["id"] = doc.id
+                results.append(data)
+            return JSONResponse({"status": "success", "strategy": "gcp", "mcps": results})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.post("/api/mcps/{server_name}/toggle")
 async def toggle_mcp(server_name: str, req: Request):
-    """Starts or Stops a sub-agent / MCP server process in Firestore."""
+    """Starts or Stops a sub-agent / MCP server process in GCP Firestore or local file storage."""
     body = await req.json()
     new_status = body.get("status", "running")
-    try:
-        from google.cloud import firestore
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
-        doc_ref = db.collection("mcp_servers").document(server_name)
-        doc_ref.set({
-            "status": new_status.lower(),
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }, merge=True)
-        return JSONResponse({"status": "success", "server_name": server_name, "new_status": new_status})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    strategy = body.get("strategy", "gcp").lower()
+
+    if strategy == "filebased":
+        try:
+            file_path = os.path.join(MCPS_DIR, f"{server_name}.json")
+            data = {}
+            if os.path.exists(file_path):
+                with open(file_path, "r") as f:
+                    data = json.load(f)
+            data["status"] = new_status.lower()
+            data["server_name"] = server_name
+            data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            with open(file_path, "w") as f:
+                json.dump(data, f, indent=2)
+            return JSONResponse({"status": "success", "strategy": "filebased", "server_name": server_name, "new_status": new_status})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    else:
+        try:
+            from google.cloud import firestore
+            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            doc_ref = db.collection("mcp_servers").document(server_name)
+            doc_ref.set({
+                "status": new_status.lower(),
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }, merge=True)
+            return JSONResponse({"status": "success", "strategy": "gcp", "server_name": server_name, "new_status": new_status})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
 @app.post("/chat")
@@ -140,11 +178,15 @@ async def chat(req: Request):
     message = body.get("message", "")
     user_id = body.get("user_id") or "web-user"
     active_mcp = body.get("active_mcp") or ""
+    strategy = body.get("strategy") or "gcp"
     parts: list[dict] = []
 
-    # If an active MCP sub-agent is selected, prepend context directive
+    # Format context with strategy and active sub-agent if selected
+    prefix = f"[Storage Strategy: {strategy.upper()}]"
     if active_mcp and not message.lower().startswith("use "):
-        message = f"Using sub-agent '{active_mcp}': {message}"
+        message = f"{prefix} Using sub-agent '{active_mcp}': {message}"
+    else:
+        message = f"{prefix} {message}"
 
     stream_url = (
         f"https://{LOCATION}-aiplatform.googleapis.com/v1/{RESOURCE}:streamQuery"

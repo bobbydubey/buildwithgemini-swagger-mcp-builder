@@ -48,7 +48,7 @@
 
   /* Left Sidebar: MCP Server Fleet */
   #sidebar {
-    width: 340px;
+    width: 350px;
     background-color: var(--sidebar-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -94,6 +94,43 @@
     color: var(--text-main);
     border-color: var(--accent-primary);
     background: rgba(99, 102, 241, 0.1);
+  }
+
+  /* Storage Strategy Bar */
+  .strategy-selector-bar {
+    padding: 0.8rem 1.2rem;
+    background: rgba(30, 41, 59, 0.4);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .strategy-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .strategy-select {
+    width: 100%;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 0.5rem 0.7rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    outline: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .strategy-select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
   }
 
   #mcp-list {
@@ -492,9 +529,21 @@
       </button>
     </div>
 
+    <!-- Storage Strategy Dropdown -->
+    <div class="strategy-selector-bar">
+      <label for="storage-strategy-select" class="strategy-label">
+        <span class="material-symbols-outlined" style="font-size:0.9rem;">database</span>
+        Storage Strategy
+      </label>
+      <select id="storage-strategy-select" class="strategy-select">
+        <option value="gcp">☁️ GCP Firestore</option>
+        <option value="filebased">📁 File-Based Storage (mcps/)</option>
+      </select>
+    </div>
+
     <div id="mcp-list">
       <div style="text-align: center; color: var(--text-dim); padding: 2rem; font-size: 0.85rem;">
-        Loading Firestore MCP servers...
+        Loading MCP servers...
       </div>
     </div>
 
@@ -522,7 +571,7 @@
       </div>
 
       <div class="quick-pills">
-        <button class="pill" onclick="sendQuickPrompt('List all registered MCP servers from Firestore database')">📋 List MCP Servers</button>
+        <button class="pill" onclick="sendQuickPrompt('List all registered MCP servers')">📋 List MCP Servers</button>
         <button class="pill" onclick="sendQuickPrompt('Ingest Swagger spec from https://petstore.swagger.io/v2/swagger.json, filter internal routes, and save petstore_mcp to database')">⚡ Ingest Petstore</button>
         <button class="pill" onclick="sendQuickPrompt('Check status of all MCP servers')">🔍 Status Check</button>
       </div>
@@ -550,8 +599,10 @@ const mcpList = document.getElementById("mcp-list");
 const btnRefresh = document.getElementById("btn-refresh");
 const activeContextLabel = document.getElementById("active-context-label");
 const btnClearContext = document.getElementById("btn-clear-context");
+const storageStrategySelect = document.getElementById("storage-strategy-select");
 
 let activeMcpServer = "";
+let currentStrategy = "gcp";
 
 function el(tag, cls, text) { 
   const e = document.createElement(tag); 
@@ -696,10 +747,15 @@ function renderReply(b, parts) {
 // ----------------------------------------------------------------------------
 // Sidebar MCP Fleet Fetch & Lifecycle Management
 // ----------------------------------------------------------------------------
+storageStrategySelect.addEventListener("change", (e) => {
+  currentStrategy = e.target.value;
+  fetchMcpServers();
+});
+
 async function fetchMcpServers() {
-  mcpList.innerHTML = '<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">Updating MCP fleet...</div>';
+  mcpList.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">Updating ${currentStrategy === "filebased" ? "mcps/ folder" : "Firestore"} fleet...</div>`;
   try {
-    const res = await fetch("/api/mcps");
+    const res = await fetch(`/api/mcps?strategy=${currentStrategy}`);
     const data = await res.json();
     if (data.status === "success" && Array.isArray(data.mcps)) {
       renderMcpList(data.mcps);
@@ -714,7 +770,7 @@ async function fetchMcpServers() {
 function renderMcpList(mcps) {
   mcpList.innerHTML = "";
   if (!mcps.length) {
-    mcpList.innerHTML = '<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">No MCP servers registered in Firestore yet.</div>';
+    mcpList.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">No MCP servers found in ${currentStrategy === "filebased" ? "local 'mcps/' directory" : "GCP Firestore"}.</div>`;
     return;
   }
 
@@ -756,7 +812,10 @@ async function toggleMcpStatus(event, serverName, newStatus) {
     const res = await fetch(`/api/mcps/${serverName}/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus })
+      body: JSON.stringify({ 
+        status: newStatus,
+        strategy: currentStrategy 
+      })
     });
     const data = await res.json();
     if (data.status === "success") {
@@ -818,7 +877,8 @@ form.addEventListener("submit", async (ev) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
         message: text,
-        active_mcp: activeMcpServer 
+        active_mcp: activeMcpServer,
+        strategy: currentStrategy
       }) 
     });
     const raw = await res.text();
