@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import datetime
 
 import google.auth
 import google.auth.transport.requests
@@ -14,6 +15,7 @@ RESOURCE = os.environ.get(
     "projects/246530964117/locations/us-east1/reasoningEngines/7037290033161699328",
 )
 LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
+FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
 
 _creds, _ = google.auth.default(
     scopes=["https://www.googleapis.com/auth/cloud-platform"]
@@ -28,7 +30,7 @@ def _auth_headers() -> dict[str, str]:
     }
 
 
-app = FastAPI()
+app = FastAPI(title="Swagger MCP Builder & Automation Studio")
 
 
 @app.exception_handler(Exception)
@@ -97,12 +99,52 @@ def _extract_part(raw_val: str) -> dict | None:
     return {"kind": "text", "text": decoded}
 
 
+@app.get("/api/mcps")
+async def get_mcps():
+    """Returns list of all registered MCP servers stored in Firestore."""
+    try:
+        from google.cloud import firestore
+        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        docs = list(db.collection("mcp_servers").stream())
+        results = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            results.append(data)
+        return JSONResponse({"status": "success", "mcps": results})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/mcps/{server_name}/toggle")
+async def toggle_mcp(server_name: str, req: Request):
+    """Starts or Stops a sub-agent / MCP server process in Firestore."""
+    body = await req.json()
+    new_status = body.get("status", "running")
+    try:
+        from google.cloud import firestore
+        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        doc_ref = db.collection("mcp_servers").document(server_name)
+        doc_ref.set({
+            "status": new_status.lower(),
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }, merge=True)
+        return JSONResponse({"status": "success", "server_name": server_name, "new_status": new_status})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/chat")
 async def chat(req: Request):
     body = await req.json()
     message = body.get("message", "")
     user_id = body.get("user_id") or "web-user"
+    active_mcp = body.get("active_mcp") or ""
     parts: list[dict] = []
+
+    # If an active MCP sub-agent is selected, prepend context directive
+    if active_mcp and not message.lower().startswith("use "):
+        message = f"Using sub-agent '{active_mcp}': {message}"
 
     stream_url = (
         f"https://{LOCATION}-aiplatform.googleapis.com/v1/{RESOURCE}:streamQuery"
@@ -114,7 +156,6 @@ async def chat(req: Request):
         session_id = await _get_or_create_session(user_id, client)
         current_message = message
 
-        # Loop up to 5 turns to allow agent to execute multi-step tools automatically
         for turn in range(5):
             payload = {
                 "class_method": "async_stream_query",

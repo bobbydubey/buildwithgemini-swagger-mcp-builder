@@ -3,73 +3,587 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent</title>
-<!-- Optional: used only to draw A2UI Icon components. If it can't load (offline/
-     corp network), icons fall back to showing their name as text. -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined">
-<style>
-  :root { --accent:#1a73e8; --bg:#f6f8fa; --border:#dfe3e8; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); display:flex; flex-direction:column; height:100vh; }
-  header { background:var(--accent); color:#fff; padding:.9rem 1.2rem; font-weight:700; }
-  #log { flex:1; overflow-y:auto; padding:1.2rem; max-width:780px; width:100%; margin:0 auto; }
-  .msg { margin:.6rem 0; }
-  .msg.user { text-align:right; }
-  .bubble { display:inline-block; padding:.6rem .9rem; border-radius:12px; background:#fff; border:1px solid var(--border); text-align:left; max-width:90%; white-space:pre-wrap; }
-  .msg.user .bubble { background:var(--accent); color:#fff; border:none; }
-  /* When the reply is an A2UI card, drop the bubble chrome so the card stands alone. */
-  .bubble.rich { background:transparent; border:none; padding:0; max-width:100%; white-space:normal; }
-  form { display:flex; gap:.5rem; padding:1rem; border-top:1px solid var(--border); background:#fff; }
-  input { flex:1; padding:.7rem; border:1px solid var(--border); border-radius:8px; font-size:1rem; }
-  button { padding:.7rem 1.1rem; border:none; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+<title>Swagger MCP Builder & Automation Studio</title>
+<!-- Google Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0">
 
-  /* --- A2UI component styles (Card, Column, Row, Text, Divider, List, Image, Icon) --- */
-  .a2card { border:1px solid var(--border); border-radius:12px; padding:1rem; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.06); max-width:100%; }
-  .a2card + .a2card, .a2col > .a2card { margin-top:.6rem; }
-  .a2col { display:flex; flex-direction:column; gap:.4rem; }
-  .a2row { display:flex; flex-direction:row; gap:.6rem; align-items:center; flex-wrap:wrap; }
-  .a2row.between { justify-content:space-between; }
-  .a2text { margin:0; line-height:1.4; }
-  .a2text.a2-h1 { font-size:1.5rem; font-weight:700; }
-  .a2text.a2-h2 { font-size:1.25rem; font-weight:700; }
-  .a2text.a2-h3 { font-size:1.1rem; font-weight:600; }
-  .a2text.a2-h4 { font-size:1rem; font-weight:600; }
-  .a2text.a2-caption { font-size:.85rem; color:#666; }
-  .a2divider { border:none; border-top:1px solid var(--border); margin:.4rem 0; width:100%; }
-  .a2img { max-width:100%; border-radius:8px; display:block; }
-  .material-symbols-outlined { font-family:'Material Symbols Outlined'; font-size:1.25rem; line-height:1; vertical-align:middle; color:var(--accent); }
+<style>
+  :root {
+    --bg-dark: #090d16;
+    --sidebar-bg: #0f172a;
+    --card-bg: #1e293b;
+    --card-hover: #26354a;
+    --border-color: #334155;
+    --accent-primary: #6366f1;
+    --accent-hover: #4f46e5;
+    --accent-light: #818cf8;
+    --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --status-running: #10b981;
+    --status-ready: #f59e0b;
+    --status-stopped: #ef4444;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* App Layout */
+  #app-container {
+    display: flex;
+    width: 100%;
+    height: 100vh;
+  }
+
+  /* Left Sidebar: MCP Server Fleet */
+  #sidebar {
+    width: 340px;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 1.2rem 1.4rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(8px);
+  }
+
+  .sidebar-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent-light);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .btn-icon {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 0.3rem 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-icon:hover {
+    color: var(--text-main);
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  #mcp-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  .mcp-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    cursor: pointer;
+  }
+  .mcp-card:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.15);
+  }
+  .mcp-card.active {
+    border-color: var(--accent-light);
+    background: linear-gradient(145deg, #1e293b 0%, rgba(99, 102, 241, 0.12) 100%);
+    box-shadow: 0 0 0 1px var(--accent-light);
+  }
+
+  .mcp-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.4rem;
+  }
+  .mcp-card-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .status-badge.running, .status-badge.ready {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--status-running);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+  .status-badge.stopped {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--status-stopped);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+    display: inline-block;
+  }
+  .status-badge.running .status-dot {
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(1.3); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+
+  .mcp-card-meta {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.8rem;
+    line-height: 1.4;
+  }
+  .mcp-card-meta span {
+    display: block;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    margin-top: 0.2rem;
+  }
+
+  .mcp-card-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .btn-sm {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-main);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+  .btn-sm:hover {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+  }
+  .btn-sm.btn-stop {
+    border-color: rgba(239, 68, 68, 0.4);
+    color: var(--status-stopped);
+  }
+  .btn-sm.btn-stop:hover {
+    background: var(--status-stopped);
+    color: #fff;
+  }
+  .btn-sm.btn-select {
+    border-color: var(--accent-light);
+    color: var(--accent-light);
+  }
+
+  .sidebar-footer {
+    padding: 1rem 1.2rem;
+    border-top: 1px solid var(--border-color);
+    background: rgba(15, 23, 42, 0.9);
+  }
+  .active-subagent-banner {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .active-subagent-banner strong {
+    color: var(--accent-light);
+  }
+
+  /* Main Dialogue Chat Layout */
+  #chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-dark);
+  }
+
+  header {
+    background: var(--sidebar-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 1.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .app-branding {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .app-logo {
+    width: 36px;
+    height: 36px;
+    background: var(--accent-gradient);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  }
+  .app-logo span {
+    color: #fff;
+    font-size: 1.3rem;
+  }
+  .app-title-group h1 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--text-main);
+  }
+  .app-title-group p {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  .quick-pills {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .pill {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 0.35rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .pill:hover {
+    color: var(--text-main);
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  /* Chat Log */
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .msg {
+    display: flex;
+    gap: 0.8rem;
+    align-items: flex-start;
+  }
+  .msg.user {
+    flex-direction: row-reverse;
+  }
+
+  .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .msg.user .avatar {
+    background: var(--accent-gradient);
+    color: #fff;
+  }
+  .msg.agent .avatar {
+    background: #1e293b;
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-light);
+  }
+
+  .bubble-wrapper {
+    display: flex;
+    flex-direction: column;
+    max-width: 80%;
+  }
+  .msg.user .bubble-wrapper {
+    align-items: flex-end;
+  }
+
+  .msg-author {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-bottom: 0.25rem;
+    padding: 0 0.2rem;
+  }
+
+  .bubble {
+    padding: 0.85rem 1.1rem;
+    border-radius: 14px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    line-height: 1.5;
+    font-size: 0.92rem;
+    white-space: pre-wrap;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  }
+  .msg.user .bubble {
+    background: var(--accent-primary);
+    color: #ffffff;
+    border: none;
+    border-bottom-right-radius: 2px;
+  }
+  .msg.agent .bubble {
+    border-bottom-left-radius: 2px;
+  }
+  .bubble.rich {
+    background: transparent;
+    border: none;
+    padding: 0;
+    max-width: 100%;
+    white-space: normal;
+    box-shadow: none;
+  }
+
+  /* Form / Input Area */
+  form {
+    padding: 1.2rem 1.8rem;
+    background: var(--sidebar-bg);
+    border-top: 1px solid var(--border-color);
+  }
+  .input-box-container {
+    max-width: 900px;
+    margin: 0 auto;
+    display: flex;
+    gap: 0.8rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 0.4rem 0.6rem;
+    transition: all 0.2s;
+  }
+  .input-box-container:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+  }
+
+  input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-main);
+    font-size: 0.95rem;
+    padding: 0.5rem 0.8rem;
+  }
+  input::placeholder {
+    color: var(--text-dim);
+  }
+
+  button.btn-send {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent-gradient);
+    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  button.btn-send:hover {
+    opacity: 0.92;
+    transform: scale(1.02);
+  }
+
+  /* A2UI Component Render Tokens for Dark Theme */
+  .a2card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.1rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    max-width: 100%;
+  }
+  .a2card + .a2card, .a2col > .a2card { margin-top: 0.75rem; }
+  .a2col { display: flex; flex-direction: column; gap: 0.5rem; }
+  .a2row { display: flex; flex-direction: row; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+  .a2row.between { justify-content: space-between; }
+  .a2text { margin: 0; line-height: 1.5; color: var(--text-main); }
+  .a2text.a2-h1 { font-family: 'Outfit', sans-serif; font-size: 1.4rem; font-weight: 700; color: #fff; }
+  .a2text.a2-h2 { font-family: 'Outfit', sans-serif; font-size: 1.2rem; font-weight: 700; color: var(--accent-light); }
+  .a2text.a2-h3 { font-family: 'Outfit', sans-serif; font-size: 1.05rem; font-weight: 600; color: var(--text-main); }
+  .a2text.a2-caption { font-size: 0.82rem; color: var(--text-muted); }
+  .a2divider { border: none; border-top: 1px solid var(--border-color); margin: 0.5rem 0; width: 100%; }
+  .a2img { max-width: 100%; border-radius: 8px; display: block; }
+  .material-symbols-outlined { font-size: 1.2rem; line-height: 1; vertical-align: middle; color: var(--accent-light); }
 </style>
 </head>
 <body>
-<header>Your Agent</header>
-<div id="log"></div>
-<form id="form">
-  <input id="input" placeholder="Ask something…" autocomplete="off" autofocus>
-  <button>Send</button>
-</form>
+<div id="app-container">
+  
+  <!-- Left Sidebar: MCP Fleet -->
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">
+        <span class="material-symbols-outlined">hub</span>
+        MCP Server Fleet
+      </div>
+      <button class="btn-icon" id="btn-refresh" title="Refresh Servers">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
+    </div>
+
+    <div id="mcp-list">
+      <div style="text-align: center; color: var(--text-dim); padding: 2rem; font-size: 0.85rem;">
+        Loading Firestore MCP servers...
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="active-subagent-banner">
+        <div>Active Context: <strong id="active-context-label">Root Manager</strong></div>
+        <button class="btn-icon" id="btn-clear-context" title="Reset to Root Agent" style="display:none;">
+          <span class="material-symbols-outlined" style="font-size:1rem;">close</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Chat / Dialogue Container -->
+  <div id="chat-container">
+    <header>
+      <div class="app-branding">
+        <div class="app-logo">
+          <span class="material-symbols-outlined">auto_awesome</span>
+        </div>
+        <div class="app-title-group">
+          <h1>Swagger MCP Builder</h1>
+          <p>AI Agent & Sub-Agent Automation Studio</p>
+        </div>
+      </div>
+
+      <div class="quick-pills">
+        <button class="pill" onclick="sendQuickPrompt('List all registered MCP servers from Firestore database')">📋 List MCP Servers</button>
+        <button class="pill" onclick="sendQuickPrompt('Ingest Swagger spec from https://petstore.swagger.io/v2/swagger.json, filter internal routes, and save petstore_mcp to database')">⚡ Ingest Petstore</button>
+        <button class="pill" onclick="sendQuickPrompt('Check status of all MCP servers')">🔍 Status Check</button>
+      </div>
+    </header>
+
+    <div id="log"></div>
+
+    <form id="form">
+      <div class="input-box-container">
+        <input id="input" placeholder="Ask Root Manager Agent or selected Sub-Agent…" autocomplete="off" autofocus>
+        <button class="btn-send">
+          <span>Send</span>
+          <span class="material-symbols-outlined">send</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <script>
 const log = document.getElementById("log");
 const form = document.getElementById("form");
 const input = document.getElementById("input");
+const mcpList = document.getElementById("mcp-list");
+const btnRefresh = document.getElementById("btn-refresh");
+const activeContextLabel = document.getElementById("active-context-label");
+const btnClearContext = document.getElementById("btn-clear-context");
 
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+let activeMcpServer = "";
 
-function bubble(who) {
+function el(tag, cls, text) { 
+  const e = document.createElement(tag); 
+  if (cls) e.className = cls; 
+  if (text != null) e.textContent = text; 
+  return e; 
+}
+
+function bubble(who, authorName) {
   const m = el("div", "msg " + who);
+  
+  const avatar = el("div", "avatar");
+  avatar.innerHTML = who === "user" ? '<span class="material-symbols-outlined">person</span>' : '<span class="material-symbols-outlined">smart_toy</span>';
+  
+  const wrapper = el("div", "bubble-wrapper");
+  const author = el("div", "msg-author", authorName || (who === "user" ? "You" : (activeMcpServer ? `Sub-Agent: ${activeMcpServer}` : "Root Manager Agent")));
   const b = el("div", "bubble");
-  m.appendChild(b); log.appendChild(m); log.scrollTop = log.scrollHeight;
+  
+  wrapper.appendChild(author);
+  wrapper.appendChild(b);
+  
+  m.appendChild(avatar);
+  m.appendChild(wrapper);
+  
+  log.appendChild(m); 
+  log.scrollTop = log.scrollHeight;
   return b;
 }
 
-/* ----------------------------------------------------------------------------
- * A2UI mini-renderer (v0.8 Basic Catalog subset).
- * Renders Card / Column / Row / Text / Divider / List / Image / Icon.
- * Anything else falls back to plain text (see renderReply). All text goes in via
- * textContent and image URLs are validated, so agent output can't inject HTML.
- * -------------------------------------------------------------------------- */
-
-// A "bound value" is usually {literalString: "..."}; we only support literals.
+// ----------------------------------------------------------------------------
+// A2UI Renderer Engine
+// ----------------------------------------------------------------------------
 function boundStr(v) {
   if (v == null) return "";
   if (typeof v === "string") return v;
@@ -77,7 +591,6 @@ function boundStr(v) {
   return "";
 }
 
-// child ids of a component's props: single `child` and/or `children.explicitList`.
 function childIds(props) {
   const ids = [];
   if (props && typeof props.child === "string") ids.push(props.child);
@@ -86,11 +599,10 @@ function childIds(props) {
   return ids;
 }
 
-// A2UI icon names are camelCase (locationOn); Material Symbols wants snake_case.
 function iconName(n) { return String(n || "").replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/\s+/g, "_").toLowerCase(); }
 
 function buildNode(id, comps, seen) {
-  if (!id || seen.has(id)) return null;   // missing / cycle guard
+  if (!id || seen.has(id)) return null;
   seen.add(id);
   const spec = comps[id];
   if (!spec || typeof spec !== "object") return null;
@@ -123,19 +635,17 @@ function buildNode(id, comps, seen) {
       return el("hr", "a2divider");
     case "Image": {
       const src = boundStr(props.url || props.src);
-      if (!/^https?:\/\//i.test(src)) return null;   // only allow safe URLs
+      if (!/^https?:\/\//i.test(src)) return null;
       const img = el("img", "a2img"); img.src = src; img.alt = boundStr(props.alt) || ""; return img;
     }
     case "Icon": {
       const s = el("span", "material-symbols-outlined"); s.textContent = iconName(boundStr(props.name) || props.name); return s;
     }
     default:
-      return null;   // unknown component -> skipped (text fallback covers content)
+      return null;
   }
 }
 
-// Render one or more A2UI messages (beginRendering + surfaceUpdate) into `container`.
-// Returns true if anything was drawn.
 function renderSurface(messages, container) {
   const comps = {};
   const roots = [];
@@ -145,7 +655,7 @@ function renderSurface(messages, container) {
     if (su && Array.isArray(su.components)) for (const c of su.components) if (c && c.id && c.component) comps[c.id] = c.component;
   }
   let rootIds = roots.filter(r => comps[r]);
-  if (rootIds.length === 0) {   // no valid root given -> infer un-referenced components
+  if (rootIds.length === 0) {
     const referenced = new Set();
     for (const id in comps) { const spec = comps[id]; childIds(spec[Object.keys(spec)[0]] || {}).forEach(c => referenced.add(c)); }
     rootIds = Object.keys(comps).filter(id => !referenced.has(id));
@@ -155,7 +665,6 @@ function renderSurface(messages, container) {
   return drew;
 }
 
-// Fallback: pull every Text value out of the messages as plain text.
 function flattenText(messages) {
   const out = [];
   for (const m of messages) {
@@ -166,7 +675,7 @@ function flattenText(messages) {
 }
 
 function renderReply(b, parts) {
-  b.textContent = "";   // clear the "…" placeholder
+  b.textContent = "";
   const texts = parts
     .filter(p => p && (p.kind === "text" || (!p.kind && p.text)))
     .map(p => p.text || "")
@@ -184,19 +693,134 @@ function renderReply(b, parts) {
   log.scrollTop = log.scrollHeight;
 }
 
-// The proxy returns { parts: [{kind:"text",text} | {kind:"a2ui",data}] }.
+// ----------------------------------------------------------------------------
+// Sidebar MCP Fleet Fetch & Lifecycle Management
+// ----------------------------------------------------------------------------
+async function fetchMcpServers() {
+  mcpList.innerHTML = '<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">Updating MCP fleet...</div>';
+  try {
+    const res = await fetch("/api/mcps");
+    const data = await res.json();
+    if (data.status === "success" && Array.isArray(data.mcps)) {
+      renderMcpList(data.mcps);
+    } else {
+      mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Failed: ${data.message || 'Error loading database'}</div>`;
+    }
+  } catch (err) {
+    mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Error: ${err.message}</div>`;
+  }
+}
+
+function renderMcpList(mcps) {
+  mcpList.innerHTML = "";
+  if (!mcps.length) {
+    mcpList.innerHTML = '<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">No MCP servers registered in Firestore yet.</div>';
+    return;
+  }
+
+  mcps.forEach(mcp => {
+    const isRunning = (mcp.status || "").toLowerCase() === "running" || (mcp.status || "").toLowerCase() === "ready";
+    const statusClass = (mcp.status || "ready").toLowerCase();
+    
+    const card = el("div", "mcp-card" + (activeMcpServer === mcp.server_name ? " active" : ""));
+    
+    card.innerHTML = `
+      <div class="mcp-card-header">
+        <div class="mcp-card-title">${mcp.title || mcp.server_name}</div>
+        <div class="status-badge ${statusClass}">
+          <span class="status-dot"></span>
+          ${mcp.status || 'ready'}
+        </div>
+      </div>
+      <div class="mcp-card-meta">
+        ${mcp.target_app || 'Java Service'} • ${mcp.total_tools || 0} tools
+        <span>${mcp.base_url || 'http://localhost:8080'}</span>
+      </div>
+      <div class="mcp-card-actions">
+        <button class="btn-sm ${isRunning ? 'btn-stop' : ''}" onclick="toggleMcpStatus(event, '${mcp.server_name}', '${isRunning ? 'stopped' : 'running'}')">
+          ${isRunning ? 'Stop Sub-Agent' : 'Start Sub-Agent'}
+        </button>
+        <button class="btn-sm btn-select" onclick="selectMcpServer(event, '${mcp.server_name}')">
+          ${activeMcpServer === mcp.server_name ? 'Active' : 'Select'}
+        </button>
+      </div>
+    `;
+
+    mcpList.appendChild(card);
+  });
+}
+
+async function toggleMcpStatus(event, serverName, newStatus) {
+  event.stopPropagation();
+  try {
+    const res = await fetch(`/api/mcps/${serverName}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus })
+    });
+    const data = await res.json();
+    if (data.status === "success") {
+      fetchMcpServers();
+    }
+  } catch (err) {
+    alert("Failed to update status: " + err.message);
+  }
+}
+
+function selectMcpServer(event, serverName) {
+  event.stopPropagation();
+  if (activeMcpServer === serverName) {
+    activeMcpServer = "";
+    activeContextLabel.textContent = "Root Manager";
+    btnClearContext.style.display = "none";
+    input.placeholder = "Ask Root Manager Agent or selected Sub-Agent…";
+  } else {
+    activeMcpServer = serverName;
+    activeContextLabel.textContent = serverName;
+    btnClearContext.style.display = "inline-flex";
+    input.placeholder = `Ask Sub-Agent '${serverName}'…`;
+  }
+  fetchMcpServers();
+}
+
+btnClearContext.addEventListener("click", () => {
+  activeMcpServer = "";
+  activeContextLabel.textContent = "Root Manager";
+  btnClearContext.style.display = "none";
+  input.placeholder = "Ask Root Manager Agent or selected Sub-Agent…";
+  fetchMcpServers();
+});
+
+btnRefresh.addEventListener("click", fetchMcpServers);
+
+// ----------------------------------------------------------------------------
+// Chat Form Interaction
+// ----------------------------------------------------------------------------
+function sendQuickPrompt(promptText) {
+  input.value = promptText;
+  form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+}
+
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+  
   bubble("user").textContent = text;
   input.value = "";
-  const b = bubble("agent"); b.textContent = "…";
+  
+  const b = bubble("agent"); 
+  b.textContent = "…";
+  
   try {
-    const res = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
-    // Read as text first, then parse. If the proxy ever returns a non-JSON error
-    // page (e.g. a plain "Internal Server Error"), show that body instead of a
-    // cryptic "Unexpected token" JSON error.
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        message: text,
+        active_mcp: activeMcpServer 
+      }) 
+    });
     const raw = await res.text();
     let data;
     try { data = JSON.parse(raw); }
@@ -206,6 +830,9 @@ form.addEventListener("submit", async (ev) => {
     b.textContent = "Error: " + e.message;
   }
 });
+
+// Initial load
+fetchMcpServers();
 </script>
 </body>
 </html>
