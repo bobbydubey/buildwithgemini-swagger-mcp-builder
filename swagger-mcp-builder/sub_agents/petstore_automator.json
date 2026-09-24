@@ -1,0 +1,7 @@
+{
+  "name": "petstore_automator",
+  "role": "This sub-agent is responsible for automating tasks related to the Petstore API, such as managing pets, orders, and users.",
+  "mcp_server": "petstore_mcp",
+  "status": "active",
+  "parent_agent": "root_agent"
+}
