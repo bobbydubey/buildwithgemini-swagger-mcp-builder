@@ -132,10 +132,8 @@ async def get_mcps(strategy: str = "gcp"):
                 data = doc.to_dict()
                 data["id"] = doc.id
                 results.append(data)
-            return JSONResponse({"status": "success", "strategy": "gcp", "mcps": results})
         except Exception as e:
-            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
+            return JSONResponse({"status": "error", "strategy": "gcp", "message": f"Firestore connection unavailable: {str(e)}", "mcps": []})
 
 @app.post("/api/mcps/{server_name}/toggle")
 async def toggle_mcp(server_name: str, req: Request):
@@ -158,7 +156,7 @@ async def toggle_mcp(server_name: str, req: Request):
                 json.dump(data, f, indent=2)
             return JSONResponse({"status": "success", "strategy": "filebased", "server_name": server_name, "new_status": new_status})
         except Exception as e:
-            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+            return JSONResponse({"status": "error", "message": str(e)})
     else:
         try:
             from google.cloud import firestore
@@ -170,7 +168,7 @@ async def toggle_mcp(server_name: str, req: Request):
             }, merge=True)
             return JSONResponse({"status": "success", "strategy": "gcp", "server_name": server_name, "new_status": new_status})
         except Exception as e:
-            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+            return JSONResponse({"status": "error", "message": str(e)})
 
 
 @app.post("/chat")
