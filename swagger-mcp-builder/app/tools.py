@@ -392,7 +392,9 @@ def create_automation_subagent(subagent_name: str, server_name: str, role_descri
 
 # HARDCODED GCP Project ID string to prevent Agent Platform deployment project-number errors
 FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
-MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mcps"))
+if not os.path.exists(MCPS_DIR):
+    MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
 os.makedirs(MCPS_DIR, exist_ok=True)
 
 

@@ -16,8 +16,9 @@ RESOURCE = os.environ.get(
     "projects/246530964117/locations/us-east1/reasoningEngines/7037290033161699328",
 )
 LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
-FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
-MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
+MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+if not os.path.exists(MCPS_DIR):
+    MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
 os.makedirs(MCPS_DIR, exist_ok=True)
 
 _creds, _ = google.auth.default(
