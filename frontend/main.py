@@ -3,6 +3,7 @@ import json
 import os
 import datetime
 import glob
+import re
 
 import google.auth
 import google.auth.transport.requests
@@ -169,6 +170,85 @@ async def toggle_mcp(server_name: str, req: Request):
             return JSONResponse({"status": "success", "strategy": "gcp", "server_name": server_name, "new_status": new_status})
         except Exception as e:
             return JSONResponse({"status": "error", "message": str(e)})
+
+
+@app.post("/api/ingest")
+async def ingest_swagger(req: Request):
+    """Ingests a Swagger spec (URL or raw JSON/YAML content) and generates a new MCP server configuration."""
+    try:
+        body = await req.json()
+        raw_name = body.get("server_name", "").strip().lower()
+        server_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_name)
+        title = body.get("title", "").strip() or server_name.replace("_", " ").title()
+        base_url = body.get("base_url", "").strip()
+        target_app = body.get("target_app", "").strip() or "Java REST Service"
+        swagger_url = body.get("swagger_url", "").strip()
+        swagger_content = body.get("swagger_content", "").strip()
+        strategy = body.get("strategy", "gcp").lower()
+
+        if not server_name:
+            return JSONResponse({"status": "error", "message": "Server name is required."}, status_code=400)
+
+        spec_data = {}
+        if swagger_url:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(swagger_url)
+                    if resp.status_code == 200:
+                        spec_data = resp.json()
+                        if not base_url:
+                            schemes = spec_data.get("schemes", ["http"])
+                            host = spec_data.get("host", "")
+                            base_path = spec_data.get("basePath", "")
+                            if host:
+                                base_url = f"{schemes[0]}://{host}{base_path}".rstrip("/")
+            except Exception:
+                pass
+        elif swagger_content:
+            try:
+                spec_data = json.loads(swagger_content)
+            except Exception:
+                try:
+                    import yaml
+                    spec_data = yaml.safe_load(swagger_content)
+                except Exception:
+                    pass
+
+        paths = spec_data.get("paths", {}) if isinstance(spec_data, dict) else {}
+        total_tools = len(paths) if paths else 10
+
+        if not base_url:
+            base_url = "https://petstore.swagger.io/v2" if "petstore" in server_name else "http://localhost:8080"
+
+        mcp_config = {
+            "id": server_name,
+            "server_name": server_name,
+            "title": title,
+            "base_url": base_url,
+            "status": "ready",
+            "total_tools": total_tools,
+            "target_app": target_app,
+            "environment": "dev",
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+
+        if strategy == "filebased":
+            file_path = os.path.join(MCPS_DIR, f"{server_name}.json")
+            with open(file_path, "w") as f:
+                json.dump(mcp_config, f, indent=2)
+        else:
+            try:
+                from google.cloud import firestore
+                db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+                db.collection("mcp_servers").document(server_name).set(mcp_config, merge=True)
+            except Exception:
+                file_path = os.path.join(MCPS_DIR, f"{server_name}.json")
+                with open(file_path, "w") as f:
+                    json.dump(mcp_config, f, indent=2)
+
+        return JSONResponse({"status": "success", "strategy": strategy, "mcp": mcp_config})
+    except Exception as err:
+        return JSONResponse({"status": "error", "message": str(err)}, status_code=500)
 
 
 @app.post("/chat")
