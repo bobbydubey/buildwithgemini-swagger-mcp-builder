@@ -1,0 +1,175 @@
+import base64
+import json
+import os
+
+import google.auth
+import google.auth.transport.requests
+import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+RESOURCE = os.environ.get(
+    "AGENT_ENGINE_RESOURCE_NAME",
+    "projects/246530964117/locations/us-east1/reasoningEngines/7037290033161699328",
+)
+LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
+
+_creds, _ = google.auth.default(
+    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+)
+
+
+def _auth_headers() -> dict[str, str]:
+    _creds.refresh(google.auth.transport.requests.Request())
+    return {
+        "Authorization": f"Bearer {_creds.token}",
+        "Content-Type": "application/json",
+    }
+
+
+app = FastAPI()
+
+
+@app.exception_handler(Exception)
+async def _json_errors(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=200,
+        content={
+            "parts": [{"kind": "text", "text": f"Error: {type(exc).__name__}: {exc}"}]
+        },
+    )
+
+
+# Store session_id per user_id
+_user_sessions: dict[str, str] = {}
+
+
+async def _get_or_create_session(user_id: str, client: httpx.AsyncClient) -> str:
+    if user_id in _user_sessions:
+        return _user_sessions[user_id]
+
+    query_url = (
+        f"https://{LOCATION}-aiplatform.googleapis.com/v1/{RESOURCE}:query"
+    )
+    payload = {
+        "class_method": "async_create_session",
+        "input": {"user_id": user_id},
+    }
+    resp = await client.post(query_url, json=payload)
+    if resp.status_code == 200:
+        session_id = resp.json().get("output", {}).get("id")
+        if session_id:
+            _user_sessions[user_id] = session_id
+            return session_id
+    return ""
+
+
+def _extract_part(raw_val: str) -> dict:
+    decoded = raw_val
+    if isinstance(raw_val, str) and (
+        raw_val.startswith("PGEyYV9k") or raw_val.startswith("PGEyYQ")
+    ):
+        try:
+            decoded = base64.b64decode(raw_val).decode("utf-8")
+        except Exception:
+            decoded = raw_val
+
+    if isinstance(decoded, str) and "<a2a_datapart_json>" in decoded:
+        try:
+            json_part = decoded.split("<a2a_datapart_json>")[1].split(
+                "</a2a_datapart_json>"
+            )[0]
+            parsed = json.loads(json_part)
+            if (
+                parsed.get("metadata", {}).get("mimeType")
+                == "application/json+a2ui"
+            ):
+                return {"kind": "a2ui", "data": parsed.get("data")}
+        except Exception:
+            pass
+
+    return {"kind": "text", "text": str(decoded)}
+
+
+@app.post("/chat")
+async def chat(req: Request):
+    body = await req.json()
+    message = body.get("message", "")
+    user_id = body.get("user_id") or "web-user"
+    parts: list[dict] = []
+
+    stream_url = (
+        f"https://{LOCATION}-aiplatform.googleapis.com/v1/{RESOURCE}:streamQuery"
+    )
+
+    async with httpx.AsyncClient(
+        headers=_auth_headers(), timeout=120.0
+    ) as client:
+        session_id = await _get_or_create_session(user_id, client)
+        current_message = message
+
+        # Loop up to 5 turns to allow agent to execute multi-step tools automatically
+        for turn in range(5):
+            payload = {
+                "class_method": "async_stream_query",
+                "input": {
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "message": current_message,
+                },
+            }
+
+            turn_parts: list[dict] = []
+            async with client.stream("POST", stream_url, json=payload) as resp:
+                if resp.status_code != 200:
+                    err_body = await resp.aread()
+                    return JSONResponse(
+                        {
+                            "parts": [
+                                {
+                                    "kind": "text",
+                                    "text": f"Agent Engine HTTP {resp.status_code}: {err_body.decode()}",
+                                }
+                            ]
+                        }
+                    )
+
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except Exception:
+                        continue
+
+                    content = event.get("content") or {}
+                    for p in content.get("parts", []):
+                        if p.get("text"):
+                            turn_parts.append(_extract_part(p.get("text")))
+
+                        inline_data = p.get("inline_data") or {}
+                        data_str = inline_data.get("data", "")
+                        if data_str:
+                            turn_parts.append(_extract_part(data_str))
+
+            if turn_parts:
+                parts.extend(turn_parts)
+                break
+            else:
+                # If no text or A2UI produced in this turn (agent ran an intermediate tool), auto-continue
+                current_message = "Please continue processing and complete the requested task."
+
+    if not parts:
+        parts = [{"kind": "text", "text": "(No response received from agent)"}]
+
+    return JSONResponse({"parts": parts})
+
+
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
