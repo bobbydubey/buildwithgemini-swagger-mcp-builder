@@ -1,7 +1,7 @@
 # My agent: Java App Swagger-to-MCP Enterprise Automation Builder
 
 **Author**: Anurag Dubey  
-**Email**: anurag.dubey3@cognizant.com  
+**Email**: dubey.anurag@outlook.com  
 
 **One-liner**: A web-managed conversational agent that accepts Swagger/OpenAPI specs from running Java applications (e.g. Spring Boot `/v3/api-docs`), allows endpoint selection and environment configuration, automatically generates & tests MCP servers with built-in audit logging and payload safety, and provides a dashboard with user login to manage MCP server lifecycle (Running, Stopped, Restart).
 
