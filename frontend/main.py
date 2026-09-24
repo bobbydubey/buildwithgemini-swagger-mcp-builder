@@ -65,17 +65,18 @@ async def _get_or_create_session(user_id: str, client: httpx.AsyncClient) -> str
     return ""
 
 
-def _extract_part(raw_val: str) -> dict:
+def _extract_part(raw_val: str) -> dict | None:
+    if not raw_val or not isinstance(raw_val, str):
+        return None
+
     decoded = raw_val
-    if isinstance(raw_val, str) and (
-        raw_val.startswith("PGEyYV9k") or raw_val.startswith("PGEyYQ")
-    ):
+    if "PGEyYV9k" in raw_val or "PGEyYQ" in raw_val:
         try:
-            decoded = base64.b64decode(raw_val).decode("utf-8")
+            decoded = base64.b64decode(raw_val.strip()).decode("utf-8")
         except Exception:
             decoded = raw_val
 
-    if isinstance(decoded, str) and "<a2a_datapart_json>" in decoded:
+    if "<a2a_datapart_json>" in decoded:
         try:
             json_part = decoded.split("<a2a_datapart_json>")[1].split(
                 "</a2a_datapart_json>"
@@ -88,8 +89,12 @@ def _extract_part(raw_val: str) -> dict:
                 return {"kind": "a2ui", "data": parsed.get("data")}
         except Exception:
             pass
+        return None
 
-    return {"kind": "text", "text": str(decoded)}
+    if decoded.startswith("PGEyYV") or "PGEyYV9k" in decoded:
+        return None
+
+    return {"kind": "text", "text": decoded}
 
 
 @app.post("/chat")
@@ -145,19 +150,21 @@ async def chat(req: Request):
 
                     content = event.get("content") or {}
                     for p in content.get("parts", []):
-                        if p.get("text"):
-                            turn_parts.append(_extract_part(p.get("text")))
+                        p_extracted = _extract_part(p.get("text"))
+                        if p_extracted:
+                            turn_parts.append(p_extracted)
 
                         inline_data = p.get("inline_data") or {}
                         data_str = inline_data.get("data", "")
                         if data_str:
-                            turn_parts.append(_extract_part(data_str))
+                            data_extracted = _extract_part(data_str)
+                            if data_extracted:
+                                turn_parts.append(data_extracted)
 
             if turn_parts:
                 parts.extend(turn_parts)
                 break
             else:
-                # If no text or A2UI produced in this turn (agent ran an intermediate tool), auto-continue
                 current_message = "Please continue processing and complete the requested task."
 
     if not parts:
