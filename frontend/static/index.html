@@ -1233,6 +1233,9 @@ function renderMcpList(mcps) {
         <button class="btn-sm btn-start" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'ready')">
           Start (Set Ready)
         </button>
+        <button class="btn-sm btn-stop" style="background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4);" onclick="deleteMcpServer(event, '${mcp.server_name}')">
+          Delete
+        </button>
       `;
     } else if (rawStatus === "ready") {
       actionButtons = `
@@ -1242,6 +1245,9 @@ function renderMcpList(mcps) {
         <button class="btn-sm btn-stop" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'stopped')">
           Stop
         </button>
+        <button class="btn-sm btn-stop" style="background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4);" onclick="deleteMcpServer(event, '${mcp.server_name}')">
+          Delete
+        </button>
       `;
     } else if (rawStatus === "active") {
       actionButtons = `
@@ -1250,6 +1256,9 @@ function renderMcpList(mcps) {
         </button>
         <button class="btn-sm btn-stop" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'stopped')">
           Stop
+        </button>
+        <button class="btn-sm btn-stop" style="background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4);" onclick="deleteMcpServer(event, '${mcp.server_name}')">
+          Delete
         </button>
       `;
     }
@@ -1346,6 +1355,30 @@ async function toggleMcpStatus(event, serverName, newStatus) {
     }
   } catch (err) {
     alert("Failed to update status: " + err.message);
+  }
+}
+
+async function deleteMcpServer(event, serverName) {
+  if (event) event.stopPropagation();
+  if (!confirm(`Are you sure you want to permanently delete MCP server '${serverName}'?`)) {
+    return;
+  }
+  
+  try {
+    const res = await fetch(`/api/mcps/${serverName}?strategy=${currentStrategy}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (data.status === "success") {
+      if (activeMcpServer === serverName) {
+        resetContext();
+      }
+      fetchMcpServers();
+    } else {
+      alert("Failed to delete: " + (data.message || "Unknown error"));
+    }
+  } catch (err) {
+    alert("Error deleting MCP server: " + err.message);
   }
 }
 

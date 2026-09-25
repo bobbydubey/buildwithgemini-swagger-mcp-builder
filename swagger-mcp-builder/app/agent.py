@@ -22,6 +22,7 @@ from google.genai import types
 from app.a2ui_utils import a2ui_callback
 from app.tools import (
     create_automation_subagent,
+    delete_mcp_server_from_db,
     execute_mcp_server_tool,
     filter_endpoints,
     generate_mcp_server,
@@ -96,6 +97,7 @@ root_agent = Agent(
         save_mcp_server_to_db,
         list_mcp_servers_from_db,
         get_mcp_server_from_db,
+        delete_mcp_server_from_db,
         create_automation_subagent,
         manage_mcp_server,
         execute_mcp_server_tool,

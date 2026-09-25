@@ -559,6 +559,66 @@ def save_mcp_server_to_db(
         return json.dumps({"status": "error", "error": str(err)})
 
 
+def delete_mcp_server_from_db(
+    server_name: str,
+    storage_strategy: str = "gcp"
+) -> str:
+    """Deletes an MCP server document and its config file from GCP Firestore/Storage or local FILEBASED storage.
+
+    Args:
+        server_name: Unique identifier/name of the MCP server to delete.
+        storage_strategy: Storage backend strategy ('gcp' or 'filebased').
+
+    Returns:
+        JSON string confirming deletion.
+    """
+    sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
+    deleted_items = []
+
+    if storage_strategy.lower() == "filebased":
+        found = False
+        for d in [_root_mcps, _pkg_mcps, MCPS_DIR]:
+            fpath = os.path.join(d, f"{sanitized_id}.json")
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    deleted_items.append(fpath)
+                    found = True
+                except Exception as e:
+                    return json.dumps({"status": "error", "error": f"Failed to delete {fpath}: {str(e)}"})
+        if not found:
+            return json.dumps({"status": "error", "message": f"MCP server '{sanitized_id}' not found in file storage."})
+        return json.dumps({"status": "success", "storage_strategy": "filebased", "deleted_files": deleted_items}, indent=2)
+    else:
+        try:
+            db = _get_firestore_client()
+            doc_ref = db.collection("mcp_servers").document(sanitized_id)
+            if doc_ref.get().exists:
+                doc_ref.delete()
+                deleted_items.append(f"Firestore document: mcp_servers/{sanitized_id}")
+
+            bucket_name = os.environ.get("GCS_BUCKET_NAME")
+            if bucket_name:
+                try:
+                    from google.cloud import storage
+                    gcs_client = storage.Client()
+                    bucket = gcs_client.bucket(bucket_name)
+                    blob = bucket.blob(f"mcps/{sanitized_id}.json")
+                    if blob.exists():
+                        blob.delete()
+                        deleted_items.append(f"GCS Blob: gs://{bucket_name}/mcps/{sanitized_id}.json")
+                except Exception:
+                    pass
+
+            fpath = os.path.join(MCPS_DIR, f"{sanitized_id}.json")
+            if os.path.exists(fpath):
+                os.remove(fpath)
+
+            return json.dumps({"status": "success", "storage_strategy": "gcp", "deleted_items": deleted_items}, indent=2)
+        except Exception as err:
+            return json.dumps({"status": "error", "error": str(err)})
+
+
 def get_mcp_server_from_db(server_name: str) -> str:
     """Reads full details and generated code of a specific registered MCP server from local file or Firestore.
 

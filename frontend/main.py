@@ -240,19 +240,116 @@ async def toggle_mcp(server_name: str, req: Request):
             return JSONResponse({"status": "error", "message": str(e)})
 
 
+def get_unique_server_name(base_name: str, strategy: str = "gcp") -> str:
+    """Generates a unique MCP server name by appending suffix counters (_1, _2, etc.) if name exists."""
+    candidate = base_name
+    counter = 1
+    existing_names = set()
+
+    # 1. Local file directories
+    _root_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+    _pkg_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
+    for d in [_root_mcps, _pkg_mcps, MCPS_DIR]:
+        if os.path.exists(d):
+            for fname in os.listdir(d):
+                if fname.endswith(".json"):
+                    existing_names.add(fname[:-5].lower())
+
+    # 2. Firestore collection if strategy is GCP
+    if strategy.lower() != "filebased":
+        try:
+            from google.cloud import firestore
+            database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
+            project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+            db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
+            docs = list(db.collection("mcp_servers").stream())
+            for doc in docs:
+                existing_names.add(doc.id.lower())
+        except Exception:
+            pass
+
+    while candidate.lower() in existing_names:
+        candidate = f"{base_name}_{counter}"
+        counter += 1
+
+    return candidate
+
+
+@app.delete("/api/mcps/{server_name}")
+async def delete_mcp(server_name: str, strategy: str = "gcp"):
+    """Deletes an MCP server configuration from GCP Firestore/Storage or local FILEBASED storage."""
+    deleted_items = []
+
+    if strategy.lower() == "filebased":
+        _root_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+        _pkg_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
+        found = False
+        for d in [_root_mcps, _pkg_mcps, MCPS_DIR]:
+            file_path = os.path.join(d, f"{server_name}.json")
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    deleted_items.append(file_path)
+                    found = True
+                except Exception as e:
+                    return JSONResponse({"status": "error", "message": f"Failed to delete {file_path}: {str(e)}"}, status_code=500)
+
+        if not found:
+            return JSONResponse({"status": "error", "message": f"File-based MCP server '{server_name}' not found."}, status_code=404)
+
+        return JSONResponse({"status": "success", "strategy": "filebased", "server_name": server_name, "deleted_items": deleted_items})
+    else:
+        # GCP Strategy
+        try:
+            from google.cloud import firestore
+            database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
+            project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+            db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
+
+            doc_ref = db.collection("mcp_servers").document(server_name)
+            if doc_ref.get().exists:
+                doc_ref.delete()
+                deleted_items.append(f"Firestore document: mcp_servers/{server_name}")
+
+            bucket_name = os.environ.get("GCS_BUCKET_NAME")
+            if bucket_name:
+                try:
+                    from google.cloud import storage
+                    gcs_client = storage.Client(project=project_id)
+                    bucket = gcs_client.bucket(bucket_name)
+                    blob = bucket.blob(f"mcps/{server_name}.json")
+                    if blob.exists():
+                        blob.delete()
+                        deleted_items.append(f"GCS Blob: gs://{bucket_name}/mcps/{server_name}.json")
+                except Exception:
+                    pass
+
+            file_path = os.path.join(MCPS_DIR, f"{server_name}.json")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            return JSONResponse({"status": "success", "strategy": "gcp", "server_name": server_name, "deleted_items": deleted_items})
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/api/ingest")
 async def ingest_swagger(req: Request):
-    """Ingests a Swagger spec (URL or raw JSON/YAML content) and generates a new MCP server configuration."""
+    """Ingests a Swagger spec (URL or raw JSON/YAML content) and generates a new MCP server configuration with unique name."""
     try:
         body = await req.json()
         raw_name = body.get("server_name", "").strip().lower()
-        server_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_name)
+        base_name = re.sub(r'[^a-zA-Z0-9_]', '_', raw_name) or "swagger_mcp"
+        strategy = body.get("strategy", "gcp").lower()
+
+        # Enforce name uniqueness
+        server_name = get_unique_server_name(base_name, strategy)
+
         title = body.get("title", "").strip() or server_name.replace("_", " ").title()
         base_url = body.get("base_url", "").strip()
         target_app = body.get("target_app", "").strip() or "Java REST Service"
         swagger_url = body.get("swagger_url", "").strip()
         swagger_content = body.get("swagger_content", "").strip()
-        strategy = body.get("strategy", "gcp").lower()
 
         if not server_name:
             return JSONResponse({"status": "error", "message": "Server name is required."}, status_code=400)
