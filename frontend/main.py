@@ -131,39 +131,76 @@ def _extract_part(raw_val: str) -> list[dict] | dict | None:
 
 
 @app.get("/api/mcps")
-async def get_mcps(strategy: str = "gcp"):
-    """Returns list of all registered MCP servers from GCP Firestore or File-based mcps/ directory."""
+async def get_mcps(strategy: str = "gcp", category: str = ""):
+    """Returns list of all registered MCP servers categorized into active, ready, and stopped."""
+    results = []
+    seen_ids = set()
+    
     if strategy.lower() == "filebased":
         try:
-            results = []
-            json_files = glob.glob(os.path.join(MCPS_DIR, "*.json"))
+            import glob
+            _root_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
+            _pkg_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
+            json_files = list(set(glob.glob(os.path.join(_root_mcps, "*.json")) + glob.glob(os.path.join(_pkg_mcps, "*.json")) + glob.glob(os.path.join(MCPS_DIR, "*.json"))))
             for filepath in json_files:
                 try:
                     with open(filepath, "r") as f:
                         data = json.load(f)
-                        data["id"] = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
-                        results.append(data)
+                        server_id = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
+                        if server_id not in seen_ids:
+                            data["id"] = server_id
+                            results.append(data)
+                            seen_ids.add(server_id)
                 except Exception:
                     pass
-            return JSONResponse({"status": "success", "strategy": "filebased", "mcps": results})
         except Exception as e:
             return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     else:
-        # Default: GCP Firestore
         try:
             from google.cloud import firestore
             database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
             project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
             db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
             docs = list(db.collection("mcp_servers").stream())
-            results = []
             for doc in docs:
                 data = doc.to_dict()
-                data["id"] = doc.id
-                results.append(data)
-            return JSONResponse({"status": "success", "strategy": "gcp", "mcps": results})
+                server_id = doc.id
+                if server_id not in seen_ids:
+                    data["id"] = server_id
+                    results.append(data)
+                    seen_ids.add(server_id)
         except Exception as e:
-            return JSONResponse({"status": "error", "strategy": "gcp", "message": f"Firestore connection unavailable: {str(e)}", "mcps": []})
+            return JSONResponse({"status": "error", "strategy": "gcp", "message": f"Firestore connection unavailable: {str(e)}", "mcps": [], "categories": {"active": [], "ready": [], "stopped": []}})
+
+    categories = {"active": [], "ready": [], "stopped": []}
+    for item in results:
+        st = (item.get("status") or "ready").lower()
+        if st in ["running", "active"]:
+            st = "active"
+        elif st in ["stopped", "disabled"]:
+            st = "stopped"
+        else:
+            st = "ready"
+        item["status"] = st
+        categories[st].append(item)
+
+    filtered_mcps = results
+    if category and category.lower() in categories:
+        filtered_mcps = categories[category.lower()]
+
+    return JSONResponse({
+        "status": "success",
+        "strategy": strategy.lower(),
+        "total": len(results),
+        "categories": categories,
+        "counts": {
+            "all": len(results),
+            "active": len(categories["active"]),
+            "ready": len(categories["ready"]),
+            "stopped": len(categories["stopped"])
+        },
+        "mcps": filtered_mcps
+    })
 
 @app.post("/api/mcps/{server_name}/toggle")
 async def toggle_mcp(server_name: str, req: Request):

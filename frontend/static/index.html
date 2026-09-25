@@ -217,6 +217,40 @@
     100% { opacity: 1; transform: scale(1); }
   }
 
+  /* Category Filter Tabs */
+  .cat-tab {
+    flex: 1;
+    padding: 0.45rem 0.2rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+  }
+  .cat-tab:hover {
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .cat-tab.active {
+    color: var(--accent-light);
+    border-bottom-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.15);
+  }
+  .cat-count {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    padding: 0.05rem 0.35rem;
+    font-size: 0.65rem;
+  }
+
   .mcp-card-meta {
     font-size: 0.8rem;
     color: var(--text-muted);
@@ -721,6 +755,22 @@
       </button>
     </div>
 
+    <!-- Category Tabs Filter (Active, Ready, Stopped) -->
+    <div id="category-tabs-bar" style="display:flex; border-bottom:1px solid var(--border-color); background:rgba(15, 23, 42, 0.6); padding:0.3rem 0.5rem; gap:0.3rem;">
+      <button class="cat-tab active" data-cat="all" onclick="filterMcpCategory('all')">
+        ALL <span id="count-all" class="cat-count">0</span>
+      </button>
+      <button class="cat-tab" data-cat="active" onclick="filterMcpCategory('active')">
+        🟢 ACTIVE <span id="count-active" class="cat-count">0</span>
+      </button>
+      <button class="cat-tab" data-cat="ready" onclick="filterMcpCategory('ready')">
+        🟡 READY <span id="count-ready" class="cat-count">0</span>
+      </button>
+      <button class="cat-tab" data-cat="stopped" onclick="filterMcpCategory('stopped')">
+        🔴 STOPPED <span id="count-stopped" class="cat-count">0</span>
+      </button>
+    </div>
+
     <div id="mcp-list">
       <div style="text-align: center; color: var(--text-dim); padding: 2rem; font-size: 0.85rem;">
         Loading MCP servers...
@@ -1100,12 +1150,39 @@ function renderReply(b, parts) {
 }
 
 // ----------------------------------------------------------------------------
-// Sidebar MCP Fleet Fetch & Lifecycle Management
+// Sidebar MCP Fleet Fetch & Lifecycle Management (Categories: Active, Ready, Stopped)
 // ----------------------------------------------------------------------------
+let currentCategoryFilter = "all";
+let cachedMcpData = null;
+
 storageStrategySelect.addEventListener("change", (e) => {
   currentStrategy = e.target.value;
   fetchMcpServers();
 });
+
+function updateCategoryCounts(counts) {
+  if (!counts) return;
+  const cAll = document.getElementById("count-all");
+  const cActive = document.getElementById("count-active");
+  const cReady = document.getElementById("count-ready");
+  const cStopped = document.getElementById("count-stopped");
+  if (cAll) cAll.textContent = counts.all || 0;
+  if (cActive) cActive.textContent = counts.active || 0;
+  if (cReady) cReady.textContent = counts.ready || 0;
+  if (cStopped) cStopped.textContent = counts.stopped || 0;
+}
+
+function filterMcpCategory(cat) {
+  currentCategoryFilter = cat;
+  document.querySelectorAll(".cat-tab").forEach(tab => {
+    tab.classList.toggle("active", tab.getAttribute("data-cat") === cat);
+  });
+  if (cachedMcpData && Array.isArray(cachedMcpData.mcps)) {
+    renderMcpList(cachedMcpData.mcps);
+  } else {
+    fetchMcpServers();
+  }
+}
 
 async function fetchMcpServers() {
   mcpList.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">Updating ${currentStrategy === "filebased" ? "mcps/ folder" : "Firestore"} fleet...</div>`;
@@ -1113,6 +1190,8 @@ async function fetchMcpServers() {
     const res = await fetch(`/api/mcps?strategy=${currentStrategy}`);
     const data = await res.json();
     if (data && data.status === "success" && Array.isArray(data.mcps)) {
+      cachedMcpData = data;
+      updateCategoryCounts(data.counts);
       renderMcpList(data.mcps);
     } else {
       mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Failed: ${(data && data.message) || 'Error loading database'}</div>`;
@@ -1124,12 +1203,23 @@ async function fetchMcpServers() {
 
 function renderMcpList(mcps) {
   mcpList.innerHTML = "";
-  if (!mcps.length) {
-    mcpList.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">No MCP servers found in ${currentStrategy === "filebased" ? "local 'mcps/' directory" : "GCP Firestore"}.</div>`;
+
+  let filtered = mcps;
+  if (currentCategoryFilter !== "all") {
+    filtered = mcps.filter(m => {
+      let st = (m.status || "ready").toLowerCase();
+      if (st === "running") st = "active";
+      if (!["stopped", "ready", "active"].includes(st)) st = "ready";
+      return st === currentCategoryFilter;
+    });
+  }
+
+  if (!filtered.length) {
+    mcpList.innerHTML = `<div style="text-align:center; color:var(--text-dim); padding:1.5rem; font-size:0.85rem;">No MCP servers in category '${currentCategoryFilter.toUpperCase()}'.</div>`;
     return;
   }
 
-  mcps.forEach(mcp => {
+  filtered.forEach(mcp => {
     let rawStatus = (mcp.status || "ready").toLowerCase();
     if (rawStatus === "running") rawStatus = "active";
     if (!["stopped", "ready", "active"].includes(rawStatus)) rawStatus = "ready";
