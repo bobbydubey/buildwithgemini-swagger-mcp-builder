@@ -186,15 +186,20 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
-  .status-badge.running, .status-badge.ready {
-    background: rgba(16, 185, 129, 0.15);
-    color: var(--status-running);
-    border: 1px solid rgba(16, 185, 129, 0.3);
+  .status-badge.active {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+  }
+  .status-badge.ready {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.4);
   }
   .status-badge.stopped {
     background: rgba(239, 68, 68, 0.15);
-    color: var(--status-stopped);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
   }
   .status-dot {
     width: 6px;
@@ -203,7 +208,7 @@
     background-color: currentColor;
     display: inline-block;
   }
-  .status-badge.running .status-dot {
+  .status-badge.active .status-dot {
     animation: pulse 1.5s infinite;
   }
   @keyframes pulse {
@@ -256,9 +261,29 @@
     background: var(--status-stopped);
     color: #fff;
   }
-  .btn-sm.btn-select {
-    border-color: var(--accent-light);
-    color: var(--accent-light);
+  .btn-sm.btn-start {
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #f59e0b;
+  }
+  .btn-sm.btn-start:hover {
+    background: #f59e0b;
+    color: #fff;
+  }
+  .btn-sm.btn-activate {
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #10b981;
+  }
+  .btn-sm.btn-activate:hover {
+    background: #10b981;
+    color: #fff;
+  }
+  .btn-sm.btn-deactivate {
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #818cf8;
+  }
+  .btn-sm.btn-deactivate:hover {
+    background: #6366f1;
+    color: #fff;
   }
 
   .sidebar-footer {
@@ -1003,10 +1028,18 @@ function buildNode(id, comps, seen) {
 function renderSurface(messages, container) {
   const comps = {};
   const roots = [];
+  const list = [];
   for (const m of messages) {
+    if (Array.isArray(m)) list.push(...m);
+    else list.push(m);
+  }
+  for (const m of list) {
+    if (!m) continue;
     if (m.beginRendering && typeof m.beginRendering.root === "string") roots.push(m.beginRendering.root);
-    const su = m.surfaceUpdate;
-    if (su && Array.isArray(su.components)) for (const c of su.components) if (c && c.id && c.component) comps[c.id] = c.component;
+    const su = m.surfaceUpdate || m;
+    if (su && Array.isArray(su.components)) {
+      for (const c of su.components) if (c && c.id && c.component) comps[c.id] = c.component;
+    }
   }
   let rootIds = roots.filter(r => comps[r]);
   if (rootIds.length === 0) {
@@ -1021,9 +1054,17 @@ function renderSurface(messages, container) {
 
 function flattenText(messages) {
   const out = [];
+  const list = [];
   for (const m of messages) {
-    const su = m.surfaceUpdate;
-    if (su && Array.isArray(su.components)) for (const c of su.components) if (c && c.component && c.component.Text) out.push(boundStr(c.component.Text.text));
+    if (Array.isArray(m)) list.push(...m);
+    else list.push(m);
+  }
+  for (const m of list) {
+    if (!m) continue;
+    const su = m.surfaceUpdate || m;
+    if (su && Array.isArray(su.components)) {
+      for (const c of su.components) if (c && c.component && c.component.Text) out.push(boundStr(c.component.Text.text));
+    }
   }
   return out.join("\n").trim();
 }
@@ -1033,7 +1074,7 @@ function renderReply(b, parts) {
   const texts = parts
     .filter(p => p && (p.kind === "text" || (!p.kind && p.text)))
     .map(p => p.text || "")
-    .filter(t => !t.startsWith("PGEyYV") && !t.includes("<a2a_datapart_json>"));
+    .filter(t => !t.startsWith("PGEyYV") && !t.includes("<a2a_datapart_json>") && !t.includes("<a2ui-json>"));
   const a2ui = parts.filter(p => p && p.kind === "a2ui" && p.data).map(p => p.data);
 
   const textStr = texts.join("\n").trim();
@@ -1060,10 +1101,10 @@ async function fetchMcpServers() {
   try {
     const res = await fetch(`/api/mcps?strategy=${currentStrategy}`);
     const data = await res.json();
-    if (data.status === "success" && Array.isArray(data.mcps)) {
+    if (data && data.status === "success" && Array.isArray(data.mcps)) {
       renderMcpList(data.mcps);
     } else {
-      mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Failed: ${data.message || 'Error loading database'}</div>`;
+      mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Failed: ${(data && data.message) || 'Error loading database'}</div>`;
     }
   } catch (err) {
     mcpList.innerHTML = `<div style="color:var(--status-stopped); padding:1rem;">Error: ${err.message}</div>`;
@@ -1078,17 +1119,48 @@ function renderMcpList(mcps) {
   }
 
   mcps.forEach(mcp => {
-    const isRunning = (mcp.status || "").toLowerCase() === "running" || (mcp.status || "").toLowerCase() === "ready";
-    const statusClass = (mcp.status || "ready").toLowerCase();
+    let rawStatus = (mcp.status || "ready").toLowerCase();
+    if (rawStatus === "running") rawStatus = "active";
+    if (!["stopped", "ready", "active"].includes(rawStatus)) rawStatus = "ready";
+
+    const isSelected = activeMcpServer === mcp.server_name;
+    const statusClass = rawStatus;
     
-    const card = el("div", "mcp-card" + (activeMcpServer === mcp.server_name ? " active" : ""));
+    let actionButtons = "";
+    if (rawStatus === "stopped") {
+      actionButtons = `
+        <button class="btn-sm btn-start" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'ready')">
+          Start (Set Ready)
+        </button>
+      `;
+    } else if (rawStatus === "ready") {
+      actionButtons = `
+        <button class="btn-sm btn-activate" onclick="activateMcpServer(event, '${mcp.server_name}')">
+          Activate
+        </button>
+        <button class="btn-sm btn-stop" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'stopped')">
+          Stop
+        </button>
+      `;
+    } else if (rawStatus === "active") {
+      actionButtons = `
+        <button class="btn-sm btn-deactivate" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'ready')">
+          Deactivate
+        </button>
+        <button class="btn-sm btn-stop" onclick="toggleMcpStatus(event, '${mcp.server_name}', 'stopped')">
+          Stop
+        </button>
+      `;
+    }
+
+    const card = el("div", "mcp-card" + (isSelected ? " active" : ""));
     
     card.innerHTML = `
       <div class="mcp-card-header">
         <div class="mcp-card-title">${mcp.title || mcp.server_name}</div>
         <div class="status-badge ${statusClass}">
           <span class="status-dot"></span>
-          ${mcp.status || 'ready'}
+          ${rawStatus.toUpperCase()}
         </div>
       </div>
       <div class="mcp-card-meta">
@@ -1096,17 +1168,20 @@ function renderMcpList(mcps) {
         <span>${mcp.base_url || 'http://localhost:8080'}</span>
       </div>
       <div class="mcp-card-actions">
-        <button class="btn-sm ${isRunning ? 'btn-stop' : ''}" onclick="toggleMcpStatus(event, '${mcp.server_name}', '${isRunning ? 'stopped' : 'running'}')">
-          ${isRunning ? 'Stop Sub-Agent' : 'Start Sub-Agent'}
-        </button>
-        <button class="btn-sm btn-select" onclick="selectMcpServer(event, '${mcp.server_name}')">
-          ${activeMcpServer === mcp.server_name ? 'Active' : 'Select'}
-        </button>
+        ${actionButtons}
       </div>
     `;
 
     mcpList.appendChild(card);
   });
+}
+
+async function activateMcpServer(event, serverName) {
+  if (event) event.stopPropagation();
+  activeMcpServer = serverName;
+  const banner = document.getElementById("activeServerBanner");
+  if (banner) banner.innerText = serverName;
+  await toggleMcpStatus(null, serverName, "active");
 }
 
 async function toggleMcpStatus(event, serverName, newStatus) {

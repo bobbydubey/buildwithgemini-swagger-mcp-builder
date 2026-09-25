@@ -1,11 +1,16 @@
-# Seed Firestore Database for swagger-mcp-builder
+import os
 import datetime
 from google.cloud import firestore
+from dotenv import load_dotenv
 
-# HARDCODED GCP Project ID string to prevent deployment project-number resolution issues
-PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
+# Load GCP project dynamically from .env
+load_dotenv()
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), ".env")))
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env")))
 
-db = firestore.Client(project=PROJECT_ID)
+PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT")
+DATABASE_ID = os.environ.get("FIRESTORE_DATABASE", "(default)")
+db = firestore.Client(project=PROJECT_ID, database=DATABASE_ID) if PROJECT_ID else firestore.Client()
 
 COLLECTION_NAME = "mcp_servers"
 
@@ -41,6 +46,28 @@ seed_data = [
         "total_tools": 8,
         "target_app": "Java Spring Security Microservice",
         "environment": "prod",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    },
+    {
+        "id": "fakeapi_mcp",
+        "server_name": "fakeapi_mcp",
+        "title": "Fake REST API Gateway",
+        "base_url": "https://fakerestapi.azurewebsites.net",
+        "status": "ready",
+        "total_tools": 12,
+        "target_app": "Java Spring Boot Application",
+        "environment": "dev",
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    },
+    {
+        "id": "payment_service_mcp",
+        "server_name": "payment_service_mcp",
+        "title": "Payment Gateway API",
+        "base_url": "https://payment.company.com/api/v1",
+        "status": "stopped",
+        "total_tools": 14,
+        "target_app": "Java Spring Boot Payment Service",
+        "environment": "dev",
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
 ]

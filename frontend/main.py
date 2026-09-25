@@ -4,6 +4,16 @@ import os
 import datetime
 import glob
 import re
+import sys
+from dotenv import load_dotenv
+
+# Load GCP configuration exclusively from .env file or environment variables
+load_dotenv()
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env")))
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "swagger-mcp-builder", ".env")))
+
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "true")
+FIRESTORE_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 
 import google.auth
 import google.auth.transport.requests
@@ -12,11 +22,11 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-RESOURCE = os.environ.get(
-    "AGENT_ENGINE_RESOURCE_NAME",
-    "projects/246530964117/locations/us-east1/reasoningEngines/7037290033161699328",
-)
-LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
+RESOURCE = os.environ.get("AGENT_ENGINE_RESOURCE_NAME", "")
+LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+if RESOURCE and "/locations/" in RESOURCE:
+    LOCATION = RESOURCE.split("/locations/")[1].split("/")[0]
+
 MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
 if not os.path.exists(MCPS_DIR):
     MCPS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "mcps"))
@@ -72,7 +82,7 @@ async def _get_or_create_session(user_id: str, client: httpx.AsyncClient) -> str
     return ""
 
 
-def _extract_part(raw_val: str) -> dict | None:
+def _extract_part(raw_val: str) -> list[dict] | dict | None:
     if not raw_val or not isinstance(raw_val, str):
         return None
 
@@ -82,6 +92,22 @@ def _extract_part(raw_val: str) -> dict | None:
             decoded = base64.b64decode(raw_val.strip()).decode("utf-8")
         except Exception:
             decoded = raw_val
+
+    if "<a2ui-json>" in decoded:
+        try:
+            parts = []
+            before = decoded.split("<a2ui-json>")[0].strip()
+            if before:
+                parts.append({"kind": "text", "text": before})
+            json_part = decoded.split("<a2ui-json>")[1].split("</a2ui-json>")[0].strip()
+            parsed = json.loads(json_part)
+            parts.append({"kind": "a2ui", "data": parsed})
+            after = decoded.split("</a2ui-json>")[1].strip()
+            if after:
+                parts.append({"kind": "text", "text": after})
+            return parts
+        except Exception:
+            pass
 
     if "<a2a_datapart_json>" in decoded:
         try:
@@ -126,13 +152,16 @@ async def get_mcps(strategy: str = "gcp"):
         # Default: GCP Firestore
         try:
             from google.cloud import firestore
-            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
+            project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+            db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
             docs = list(db.collection("mcp_servers").stream())
             results = []
             for doc in docs:
                 data = doc.to_dict()
                 data["id"] = doc.id
                 results.append(data)
+            return JSONResponse({"status": "success", "strategy": "gcp", "mcps": results})
         except Exception as e:
             return JSONResponse({"status": "error", "strategy": "gcp", "message": f"Firestore connection unavailable: {str(e)}", "mcps": []})
 
@@ -161,7 +190,9 @@ async def toggle_mcp(server_name: str, req: Request):
     else:
         try:
             from google.cloud import firestore
-            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
+            project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+            db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
             doc_ref = db.collection("mcp_servers").document(server_name)
             doc_ref.set({
                 "status": new_status.lower(),
@@ -239,7 +270,9 @@ async def ingest_swagger(req: Request):
         else:
             try:
                 from google.cloud import firestore
-                db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+                database_id = os.environ.get("FIRESTORE_DATABASE", "(default)")
+                project_id = FIRESTORE_PROJECT_ID or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+                db = firestore.Client(project=project_id, database=database_id) if project_id else firestore.Client(database=database_id)
                 db.collection("mcp_servers").document(server_name).set(mcp_config, merge=True)
             except Exception:
                 file_path = os.path.join(MCPS_DIR, f"{server_name}.json")
@@ -249,6 +282,23 @@ async def ingest_swagger(req: Request):
         return JSONResponse({"status": "success", "strategy": strategy, "mcp": mcp_config})
     except Exception as err:
         return JSONResponse({"status": "error", "message": str(err)}, status_code=500)
+
+
+_local_runner = None
+_local_session_service = None
+
+async def _get_local_runner():
+    global _local_runner, _local_session_service
+    if _local_runner is None:
+        builder_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "swagger-mcp-builder"))
+        if builder_dir not in sys.path:
+            sys.path.insert(0, builder_dir)
+        from app.agent import root_agent
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        _local_session_service = InMemorySessionService()
+        _local_runner = Runner(agent=root_agent, session_service=_local_session_service, app_name="swagger_mcp_builder")
+    return _local_runner, _local_session_service
 
 
 @app.post("/chat")
@@ -266,6 +316,38 @@ async def chat(req: Request):
         message = f"{prefix} Using sub-agent '{active_mcp}': {message}"
     else:
         message = f"{prefix} {message}"
+
+    # Try local ADK execution first for seamless local development
+    try:
+        runner, session_svc = await _get_local_runner()
+        session_id = f"session_{user_id}"
+        session = await session_svc.get_session(user_id=user_id, session_id=session_id, app_name="swagger_mcp_builder")
+        if session is None:
+            await session_svc.create_session(user_id=user_id, session_id=session_id, app_name="swagger_mcp_builder")
+
+        from google.genai import types
+        msg_content = types.Content(role="user", parts=[types.Part.from_text(text=message)])
+
+        print(f"Running local runner for message: {message}", flush=True)
+        async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=msg_content):
+            print(f"Local runner event received: {type(event)}", flush=True)
+            if hasattr(event, "content") and event.content:
+                for p in event.content.parts:
+                    if hasattr(p, "text") and p.text:
+                        p_extracted = _extract_part(p.text)
+                        print(f"Extracted part: {p_extracted}", flush=True)
+                        if p_extracted:
+                            if isinstance(p_extracted, list):
+                                parts.extend(p_extracted)
+                            else:
+                                parts.append(p_extracted)
+        print(f"Local runner completed. Total parts: {len(parts)}", flush=True)
+        if parts:
+            return JSONResponse({"parts": parts})
+    except Exception as local_err:
+        import traceback
+        print("Local runner error:", local_err, flush=True)
+        traceback.print_exc()
 
     stream_url = (
         f"https://{LOCATION}-aiplatform.googleapis.com/v1/{RESOURCE}:streamQuery"
@@ -314,14 +396,20 @@ async def chat(req: Request):
                     for p in content.get("parts", []):
                         p_extracted = _extract_part(p.get("text"))
                         if p_extracted:
-                            turn_parts.append(p_extracted)
+                            if isinstance(p_extracted, list):
+                                turn_parts.extend(p_extracted)
+                            else:
+                                turn_parts.append(p_extracted)
 
                         inline_data = p.get("inline_data") or {}
                         data_str = inline_data.get("data", "")
                         if data_str:
                             data_extracted = _extract_part(data_str)
                             if data_extracted:
-                                turn_parts.append(data_extracted)
+                                if isinstance(data_extracted, list):
+                                    turn_parts.extend(data_extracted)
+                                else:
+                                    turn_parts.append(data_extracted)
 
             if turn_parts:
                 parts.extend(turn_parts)

@@ -15,6 +15,7 @@
 """Tools for parsing OpenAPI/Swagger specs, generating MCP servers, and managing server lifecycle."""
 
 import fnmatch
+import glob
 import json
 import os
 import re
@@ -23,6 +24,13 @@ import subprocess
 import sys
 import urllib.request
 import yaml
+from dotenv import load_dotenv
+
+# Load GCP environment variables exclusively from .env file or environment variables
+load_dotenv()
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env")))
+load_dotenv(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env")))
+
 
 
 SERVERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcp_servers"))
@@ -390,8 +398,11 @@ def create_automation_subagent(subagent_name: str, server_name: str, role_descri
     }, indent=2)
 
 
-# HARDCODED GCP Project ID string to prevent Agent Platform deployment project-number errors
-FIRESTORE_PROJECT_ID = "qwiklabs-gcp-02-2343073419d6"
+# GCP Project ID, Firestore database, and GCS bucket loaded dynamically from environment or .env
+FIRESTORE_PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+FIRESTORE_DATABASE_ID = os.environ.get("FIRESTORE_DATABASE", "(default)")
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "")
+
 _root_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mcps"))
 _pkg_mcps = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "mcps"))
 
@@ -402,6 +413,23 @@ elif os.path.exists(_pkg_mcps):
 else:
     MCPS_DIR = _pkg_mcps
 os.makedirs(MCPS_DIR, exist_ok=True)
+
+
+def _get_firestore_client():
+    from google.cloud import firestore
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or FIRESTORE_PROJECT_ID
+    database = os.environ.get("FIRESTORE_DATABASE") or FIRESTORE_DATABASE_ID
+    if project:
+        return firestore.Client(project=project, database=database)
+    return firestore.Client(database=database)
+
+
+def _get_gcs_client():
+    from google.cloud import storage
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or FIRESTORE_PROJECT_ID
+    if project:
+        return storage.Client(project=project)
+    return storage.Client()
 
 
 def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = "") -> str:
@@ -444,8 +472,7 @@ def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = ""
         }, indent=2)
 
     try:
-        from google.cloud import firestore
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        db = _get_firestore_client()
         collection_ref = db.collection("mcp_servers")
 
         if status_filter:
@@ -522,8 +549,7 @@ def save_mcp_server_to_db(
             return json.dumps({"status": "error", "error": str(err)})
 
     try:
-        from google.cloud import firestore
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        db = _get_firestore_client()
         db.collection("mcp_servers").document(sanitized_id).set(doc_data, merge=True)
 
         return json.dumps({
@@ -558,8 +584,7 @@ def get_mcp_server_from_db(server_name: str) -> str:
             pass
 
     try:
-        from google.cloud import firestore
-        db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+        db = _get_firestore_client()
         doc = db.collection("mcp_servers").document(sanitized_id).get()
         if doc.exists:
             data = doc.to_dict()
@@ -591,7 +616,7 @@ def execute_mcp_server_tool(server_name: str, endpoint_path: str, method: str = 
         sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
         server_data = {}
         try:
-            db = firestore.Client(project=FIRESTORE_PROJECT_ID)
+            db = _get_firestore_client()
             doc = db.collection("mcp_servers").document(sanitized_id).get()
             if doc.exists:
                 server_data = doc.to_dict()
@@ -604,12 +629,23 @@ def execute_mcp_server_tool(server_name: str, endpoint_path: str, method: str = 
                 with open(local_json, "r") as f:
                     server_data = json.load(f)
 
-        base_url = server_data.get("base_url", "").rstrip("/")
-        if not base_url or "localhost" in base_url:
-            if "petstore" in sanitized_id:
-                base_url = "https://petstore.swagger.io/v2"
+        if endpoint_path.startswith("http://") or endpoint_path.startswith("https://"):
+            full_url = endpoint_path
+        else:
+            base_url = server_data.get("base_url", "").rstrip("/")
+            if not base_url or "localhost" in base_url:
+                if "petstore" in sanitized_id:
+                    base_url = "https://petstore.swagger.io/v2"
 
-        full_url = f"{base_url}/{endpoint_path.lstrip('/')}"
+            path_clean = endpoint_path.lstrip('/')
+            parsed_base = urllib.parse.urlparse(base_url)
+            base_path = parsed_base.path.strip('/')
+            if base_path and path_clean.startswith(base_path + '/'):
+                path_clean = path_clean[len(base_path) + 1:]
+            elif base_path and path_clean == base_path:
+                path_clean = ""
+
+            full_url = f"{base_url}/{path_clean}".rstrip('/')
 
         params = json.loads(query_or_body_json) if query_or_body_json else {}
         
