@@ -52,7 +52,7 @@ seed_data = [
         "id": "fakeapi_mcp",
         "server_name": "fakeapi_mcp",
         "title": "Fake REST API Gateway",
-        "base_url": "https://fakerestapi.azurewebsites.net",
+        "base_url": "https://fakerestapi.azurewebsites.net/api/v1",
         "status": "ready",
         "total_tools": 12,
         "target_app": "Java Spring Boot Application",

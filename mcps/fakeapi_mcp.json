@@ -2,7 +2,7 @@
   "id": "fakeapi_mcp",
   "server_name": "fakeapi_mcp",
   "title": "Fake API gatway",
-  "base_url": "https://fakerestapi.azurewebsites.net",
+  "base_url": "https://fakerestapi.azurewebsites.net/api/v1",
   "status": "ready",
   "total_tools": 12,
   "target_app": "JAVA Springboot application",
