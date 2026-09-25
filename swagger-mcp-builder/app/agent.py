@@ -48,7 +48,8 @@ SYSTEM_INSTRUCTION = schema_manager.generate_system_prompt(
         "4. Persist registered MCP server metadata to the Firestore database (`save_mcp_server_to_db`, `list_mcp_servers_from_db`, `get_mcp_server_from_db`). "
         "5. Create dedicated AUTOMATION SUB-AGENTS (using `create_automation_subagent`) bound to generated MCP servers. "
         "6. Manage background MCP server processes (`manage_mcp_server`). "
-        "7. Execute API requests and data actions on registered MCP servers on behalf of user requests or sub-agents using `execute_mcp_server_tool`."
+        "7. Execute API requests and data actions on registered MCP servers on behalf of user requests or sub-agents using `execute_mcp_server_tool`. "
+        "8. MASTER ROUTER (AUTO MODE): When [AUTO ROUTER MODE] is specified or no specific sub-agent is manually locked, call `list_mcp_servers_from_db` to inspect registered MCP servers. Select the sub-agent matching the user's intent (e.g. fakeapi_mcp for books, petstore_mcp for pets, user_auth_mcp for users) and immediately invoke `execute_mcp_server_tool` using the standard REST endpoint path (for books: `/Books/{id}`, for pets: `/pet/{id}`, for auth: `/users/{id}`). Execute the tool directly without asking for confirmation."
     ),
     workflow_description=(
         "Analyze the request and return structured UI (Cards, Columns, Rows, Text) when presenting MCP servers, Swagger endpoints, or process statuses. "

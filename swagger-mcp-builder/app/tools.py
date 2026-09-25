@@ -443,9 +443,10 @@ def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = ""
         JSON string containing the array of matching MCP server documents.
     """
     results = []
+    seen_ids = set()
 
-    # Always check local MCPS_DIR first if strategy is filebased, empty, or fallback
-    if not storage_strategy or storage_strategy.lower() == "filebased":
+    # 1. Check local MCPS_DIR files first
+    if not storage_strategy or storage_strategy.lower() in ["filebased", "gcp"]:
         try:
             import glob
             json_files = glob.glob(os.path.join(MCPS_DIR, "*.json"))
@@ -453,46 +454,42 @@ def list_mcp_servers_from_db(status_filter: str = "", storage_strategy: str = ""
                 try:
                     with open(filepath, "r") as f:
                         data = json.load(f)
-                        data["id"] = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
+                        server_id = data.get("server_name") or os.path.basename(filepath).replace(".json", "")
+                        data["id"] = server_id
                         st = (data.get("status") or "ready").lower()
                         sf = status_filter.lower()
                         if not sf or st == sf or (sf in ["running", "ready"] and st in ["running", "ready"]):
                             results.append(data)
+                            seen_ids.add(server_id)
                 except Exception:
                     pass
         except Exception:
             pass
 
-    if results or storage_strategy.lower() == "filebased":
-        return json.dumps({
-            "status": "success",
-            "storage_strategy": "filebased",
-            "total": len(results),
-            "servers": results
-        }, indent=2)
-
-    try:
-        db = _get_firestore_client()
-        collection_ref = db.collection("mcp_servers")
-
-        if status_filter:
-            docs = collection_ref.where("status", "==", status_filter.lower()).stream()
-        else:
+    # 2. Query Firestore collection if available
+    if storage_strategy.lower() != "filebased":
+        try:
+            db = _get_firestore_client()
+            collection_ref = db.collection("mcp_servers")
             docs = collection_ref.stream()
+            for doc in docs:
+                data = doc.to_dict()
+                server_id = doc.id
+                if server_id not in seen_ids:
+                    data["id"] = server_id
+                    st = (data.get("status") or "ready").lower()
+                    sf = status_filter.lower()
+                    if not sf or st == sf or (sf in ["running", "ready"] and st in ["running", "ready"]):
+                        results.append(data)
+                        seen_ids.add(server_id)
+        except Exception:
+            pass
 
-        for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            results.append(data)
-
-        return json.dumps({
-            "status": "success",
-            "storage_strategy": "gcp",
-            "total": len(results),
-            "servers": results
-        }, indent=2)
-    except Exception as err:
-        return json.dumps({"status": "error", "error": str(err)})
+    return json.dumps({
+        "status": "success",
+        "total": len(results),
+        "servers": results
+    }, indent=2)
 
 
 def save_mcp_server_to_db(

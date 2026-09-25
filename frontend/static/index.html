@@ -710,6 +710,17 @@
       </select>
     </div>
 
+    <!-- Pattern 1 Auto Mode Router Selector Bar -->
+    <div id="auto-router-bar" style="padding:0.6rem 1rem; background:rgba(99,102,241,0.08); border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; font-weight:600; color:var(--accent-light);">
+        <span class="material-symbols-outlined" style="font-size:1rem;">psychology</span>
+        Routing Mode
+      </div>
+      <button id="btn-toggle-auto-router" class="btn-sm btn-activate" style="flex:none; padding:0.3rem 0.6rem; font-size:0.75rem;" onclick="toggleAutoRouter()">
+        🤖 Enable Auto Mode
+      </button>
+    </div>
+
     <div id="mcp-list">
       <div style="text-align: center; color: var(--text-dim); padding: 2rem; font-size: 0.85rem;">
         Loading MCP servers...
@@ -719,7 +730,7 @@
     <div class="sidebar-footer">
       <div class="active-subagent-banner">
         <div>Active Context: <strong id="active-context-label">Root Manager</strong></div>
-        <button class="btn-icon" id="btn-clear-context" title="Reset to Root Agent" style="display:none;">
+        <button class="btn-icon" id="btn-clear-context" title="Reset to Root Agent" style="display:none;" onclick="resetContext()">
           <span class="material-symbols-outlined" style="font-size:1rem;">close</span>
         </button>
       </div>
@@ -1176,11 +1187,55 @@ function renderMcpList(mcps) {
   });
 }
 
+function toggleAutoRouter() {
+  if (activeMcpServer === "auto") {
+    resetContext();
+  } else {
+    activeMcpServer = "auto";
+    activeContextLabel.innerHTML = `<span style="color:#10b981;">🤖 Master Router (Auto-Detect)</span>`;
+    btnClearContext.style.display = "inline-flex";
+    input.placeholder = "Ask Master Router (Auto-detects matching MCP server)…";
+    const btn = document.getElementById("btn-toggle-auto-router");
+    if (btn) {
+      btn.innerHTML = "✅ Auto Mode Active";
+      btn.style.background = "rgba(16, 185, 129, 0.2)";
+      btn.style.color = "#10b981";
+      btn.style.borderColor = "rgba(16, 185, 129, 0.4)";
+    }
+    fetchMcpServers();
+  }
+}
+
+function resetContext() {
+  activeMcpServer = "";
+  activeContextLabel.textContent = "Root Manager";
+  btnClearContext.style.display = "none";
+  input.placeholder = "Ask Root Manager Agent or selected Sub-Agent…";
+  const btn = document.getElementById("btn-toggle-auto-router");
+  if (btn) {
+    btn.innerHTML = "🤖 Enable Auto Mode";
+    btn.style.background = "";
+    btn.style.color = "";
+    btn.style.borderColor = "";
+  }
+  fetchMcpServers();
+}
+
 async function activateMcpServer(event, serverName) {
   if (event) event.stopPropagation();
   activeMcpServer = serverName;
-  const banner = document.getElementById("activeServerBanner");
-  if (banner) banner.innerText = serverName;
+  activeContextLabel.textContent = serverName;
+  btnClearContext.style.display = "inline-flex";
+  input.placeholder = `Ask Sub-Agent '${serverName}'…`;
+
+  const btn = document.getElementById("btn-toggle-auto-router");
+  if (btn) {
+    btn.innerHTML = "🤖 Enable Auto Mode";
+    btn.style.background = "";
+    btn.style.color = "";
+    btn.style.borderColor = "";
+  }
+
   await toggleMcpStatus(null, serverName, "active");
 }
 
@@ -1207,26 +1262,13 @@ async function toggleMcpStatus(event, serverName, newStatus) {
 function selectMcpServer(event, serverName) {
   if (event) event.stopPropagation();
   if (activeMcpServer === serverName) {
-    activeMcpServer = "";
-    activeContextLabel.textContent = "Root Manager";
-    btnClearContext.style.display = "none";
-    input.placeholder = "Ask Root Manager Agent or selected Sub-Agent…";
+    resetContext();
   } else {
-    activeMcpServer = serverName;
-    activeContextLabel.textContent = serverName;
-    btnClearContext.style.display = "inline-flex";
-    input.placeholder = `Ask Sub-Agent '${serverName}'…`;
+    activateMcpServer(event, serverName);
   }
-  fetchMcpServers();
 }
 
-btnClearContext.addEventListener("click", () => {
-  activeMcpServer = "";
-  activeContextLabel.textContent = "Root Manager";
-  btnClearContext.style.display = "none";
-  input.placeholder = "Ask Root Manager Agent or selected Sub-Agent…";
-  fetchMcpServers();
-});
+btnClearContext.addEventListener("click", resetContext);
 
 btnRefresh.addEventListener("click", fetchMcpServers);
 

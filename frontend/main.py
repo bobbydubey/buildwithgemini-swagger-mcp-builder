@@ -312,10 +312,10 @@ async def chat(req: Request):
 
     # Format context with strategy and active sub-agent if selected
     prefix = f"[Storage Strategy: {strategy.upper()}]"
-    if active_mcp and not message.lower().startswith("use "):
+    if active_mcp and active_mcp.lower() not in ["auto", "auto_router"] and not message.lower().startswith("use "):
         message = f"{prefix} Using sub-agent '{active_mcp}': {message}"
     else:
-        message = f"{prefix} {message}"
+        message = f"{prefix} [AUTO ROUTER MODE] Auto-detect the matching registered MCP server from the database and execute request: {message}"
 
     # Try local ADK execution first for seamless local development
     try:
