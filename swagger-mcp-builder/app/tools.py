@@ -570,15 +570,16 @@ def get_mcp_server_from_db(server_name: str) -> str:
     """
     sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
     
-    local_json = os.path.join(MCPS_DIR, f"{sanitized_id}.json")
-    if os.path.exists(local_json):
-        try:
-            with open(local_json, "r") as f:
-                data = json.load(f)
-                data["id"] = sanitized_id
-                return json.dumps({"status": "success", "server": data}, indent=2)
-        except Exception:
-            pass
+    for d in [_root_mcps, _pkg_mcps]:
+        local_json = os.path.join(d, f"{sanitized_id}.json")
+        if os.path.exists(local_json):
+            try:
+                with open(local_json, "r") as f:
+                    data = json.load(f)
+                    data["id"] = sanitized_id
+                    return json.dumps({"status": "success", "server": data}, indent=2)
+            except Exception:
+                pass
 
     try:
         db = _get_firestore_client()
@@ -612,19 +613,24 @@ def execute_mcp_server_tool(server_name: str, endpoint_path: str, method: str = 
 
         sanitized_id = re.sub(r'[^a-zA-Z0-9_]', '_', server_name.lower())
         server_data = {}
-        try:
-            db = _get_firestore_client()
-            doc = db.collection("mcp_servers").document(sanitized_id).get()
-            if doc.exists:
-                server_data = doc.to_dict()
-        except Exception:
-            pass
+        for d in [_root_mcps, _pkg_mcps]:
+            local_json = os.path.join(d, f"{sanitized_id}.json")
+            if os.path.exists(local_json):
+                try:
+                    with open(local_json, "r") as f:
+                        server_data = json.load(f)
+                        break
+                except Exception:
+                    pass
 
         if not server_data:
-            local_json = os.path.join(MCPS_DIR, f"{sanitized_id}.json")
-            if os.path.exists(local_json):
-                with open(local_json, "r") as f:
-                    server_data = json.load(f)
+            try:
+                db = _get_firestore_client()
+                doc = db.collection("mcp_servers").document(sanitized_id).get()
+                if doc.exists:
+                    server_data = doc.to_dict()
+            except Exception:
+                pass
 
         if endpoint_path.startswith("http://") or endpoint_path.startswith("https://"):
             full_url = endpoint_path
